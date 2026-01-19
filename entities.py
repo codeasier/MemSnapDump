@@ -1,4 +1,4 @@
-from typing import Dict, List, Literal, Any
+from typing import Dict, List, Literal, Optional, Any
 
 
 class Frame:
@@ -211,6 +211,19 @@ class Segment:
             blocks=[block.to_dict() for block in self.blocks]
         )
 
+    def find_block_idx_by_block_addr(self, block_addr: int):
+        left = 0
+        right = len(self.blocks) - 1
+        while left < right:
+            mid = (left + right) // 2
+            if block_addr < self.blocks[mid].address:
+                right = mid - 1
+            elif block_addr >= self.blocks[mid].address + self.blocks[mid].size:
+                left = mid + 1
+            else:
+                return mid
+        return -1
+
 
 class DeviceSnapshot:
     segments: List[Segment]
@@ -240,3 +253,17 @@ class DeviceSnapshot:
             'segments': [segment.to_dict() for segment in self.segments],
             'device_traces': [[trace.to_dict() for trace in self.trace_entries]]
         }
+
+    def find_segment_by_block_addr(self, block_addr: int) -> Optional[Segment]:
+        left = 0
+        segments = self.segments
+        right = len(segments) - 1
+        while left <= right:
+            mid = (left + right) // 2
+            if block_addr < segments[mid].address:
+                right = mid - 1
+            elif block_addr >= segments[mid].address + segments[mid].total_size:
+                left = mid + 1
+            else:
+                return segments[mid]
+        return None
