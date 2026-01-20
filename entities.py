@@ -158,7 +158,7 @@ class Segment:
     frames: List[Frame] = []
 
     _origin: dict = None  # Readonly
-    _block_map: Dict[int, Block] = {}
+    seg_block_map: Dict[int, Block] = {}
 
     @classmethod
     def from_dict(cls, segment_dict: dict):
@@ -176,7 +176,7 @@ class Segment:
         for block in segment_dict["blocks"]:
             _block = Block.from_dict(block)
             _block.segment_ptr = segment
-            segment._block_map[_block.address] = _block
+            segment.seg_block_map[_block.address] = _block
             segment.blocks.append(_block)
         return segment
 
@@ -195,7 +195,7 @@ class Segment:
             address=segment.address,
             state=BlockState.INACTIVE
         )]
-        segment._block_map[segment.address] = segment.blocks[0]
+        segment.seg_block_map[segment.address] = segment.blocks[0]
         return segment
 
     def to_dict(self):
@@ -241,7 +241,7 @@ class DeviceSnapshot:
         # 读取dump时内存状态
         for segment_dict in segments_dict:
             _segment = Segment.from_dict(segment_dict)
-            snapshot.block_map |= _segment._block_map
+            snapshot.block_map |= _segment.seg_block_map
         snapshot.segments.sort(key=lambda segment: segment.address)
         # 读取事件序列
         for idx, trace_entry_dict in enumerate(device_trace_list):
