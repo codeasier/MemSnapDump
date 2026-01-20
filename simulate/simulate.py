@@ -1,11 +1,11 @@
 import bisect
-import logging
 import math
 from abc import ABC, abstractmethod
+from typing import Dict
 
-from logger import get_logger
+from util import get_logger
 
-from entities import *
+from base import *
 
 loading_logger = get_logger("LOAD")
 replay_logger = get_logger("REPLAY")
@@ -15,7 +15,7 @@ class SimulateHooker(ABC):
     @abstractmethod
     def pre_undo_event(self, wait4undo_event: TraceEntry, current_snapshot: DeviceSnapshot) -> bool:
         """
-            【READONLY】在回放事件前毁掉，此时事件列表**并未POP**出该事件
+            【READONLY】在回放事件前回调，此时事件列表**并未POP**出该事件
         :param wait4undo_event: （只读）待回放的事件（仍在事件列表中）
         :param current_snapshot: （制度）当前的内存块快照
         :return 返回true继续执行，返回false将中断
@@ -25,7 +25,7 @@ class SimulateHooker(ABC):
     @abstractmethod
     def post_undo_event(self, already_undo_event: TraceEntry, current_snapshot: DeviceSnapshot):
         """
-            【READONLY】在回放事件后毁掉，此时snapshot已经将该事件从事件列表中丢弃，且segments已回放到事件发生前
+            【READONLY】在回放事件后回调，此时snapshot已经将该事件从事件列表中丢弃，且segments已回放到事件发生前
         :param already_undo_event: 已回放的事件
         :param current_snapshot: （只读）当前内存快照
         :return 返回true继续执行，返回false将中断
@@ -125,10 +125,11 @@ class SimulateDeviceSnapshot:
         :param seg_addr: 待释放段的地址
         :param merge: 是否虚拟内存场景
         """
+        _error = "Unmap segment failed"
         segments = self.device_snapshot.segments
         idx = bisect.bisect_left([seg.address for seg in segments], seg_addr)
         if idx == len(segments) or (idx == 0 and segments[idx].address != seg_addr):
-            logging.error(f"[REPLAYING] Unmap segment failed: cannot found segment(addr={seg_addr})")
+            replay_logger.error(f"{_error}: cannot found segment(addr={seg_addr})")
             return
         # 非合并场景，直接找到内存地址相同的段并删除
         if not merge:
@@ -144,7 +145,7 @@ class SimulateDeviceSnapshot:
                 existing_seg_idx = i
                 break
         if existing_seg_idx == -1:
-            logging.error(f"[REPLAYING] Unmap segment failed: cannot found segment(addr={seg_addr})")
+            replay_logger.error(f"{_error}: cannot found segment(addr={seg_addr})")
             return
         existing_seg = segments[existing_seg_idx]
         existing_seg_addr_end = existing_seg.address + existing_seg.total_size

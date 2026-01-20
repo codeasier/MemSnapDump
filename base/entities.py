@@ -243,7 +243,7 @@ class DeviceSnapshot:
         snapshot.segments = []
         snapshot.trace_entries = []
         snapshot.block_map = {}
-        # 读取dump时内存状态
+        # 读取dump_snapshot时内存状态
         for segment_dict in segments_dict:
             _segment = Segment.from_dict(segment_dict)
             snapshot.block_map |= _segment.seg_block_map

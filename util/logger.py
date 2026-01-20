@@ -1,5 +1,4 @@
 import logging
-import os
 
 
 def get_logger(name: str, level: int = logging.INFO) -> logging.Logger:
