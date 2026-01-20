@@ -2,13 +2,12 @@ import bisect
 import logging
 import math
 from abc import ABC, abstractmethod
-from typing import Optional
 
 from logger import get_logger
 
 from entities import *
 
-loading_logger = get_logger("LOADING")
+loading_logger = get_logger("LOAD")
 replay_logger = get_logger("REPLAY")
 
 
@@ -42,6 +41,7 @@ class SimulateDeviceSnapshot:
         if not snapshot_dict:
             raise RuntimeError("Cannot init snapshot from empty data.")
         self.device_snapshot = DeviceSnapshot.from_dict(snapshot_dict, device)
+        self.hookers = {}
 
     def register_hooker(self, hooker: SimulateHooker) -> int:
         idx = hash(hooker)
@@ -185,6 +185,10 @@ class SimulateDeviceSnapshot:
         if existing_block.state != BlockState.INACTIVE:
             replay_logger.error(f"{_error}: cannot split block which is not inactive, {existing_block.to_dict()}")
             return
+        if not existing_block.valid_sub_block(block.address, block.size):
+            replay_logger.error(f"{_error}: an abnormal block was found whose address is higher than the "
+                                f"existing block's offset address: {block.to_dict()}")
+            return
         # 处理块拆分
         total_size = existing_block.size
         # 左对齐
@@ -204,7 +208,7 @@ class SimulateDeviceSnapshot:
             return
         # 左侧未对齐
         total_size = existing_block.size
-        existing_block.state = block.state
+        existing_block.state = BlockState.INACTIVE
         existing_block.size = block.address - existing_block.address
         _segment.blocks.insert(idx + 1, block)
         self.device_snapshot.block_map[block.address] = block

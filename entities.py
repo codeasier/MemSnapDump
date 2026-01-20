@@ -14,7 +14,7 @@ class Frame:
         frame.filename = frame_dict["filename"]
         frame.line = frame_dict["line"]
         frame.name = frame_dict["name"]
-        frame._origin = frame_dict["origin"]
+        frame._origin = frame_dict
         return frame
 
     def to_dict(self):
@@ -65,7 +65,7 @@ class TraceEntry:
         trace_entry.size = int(trace_dict["size"])
         trace_entry.stream = int(trace_dict["stream"])
         trace_entry._origin = trace_dict
-        trace_entry.frames = [_trace_dict.to_dict() for _trace_dict in trace_dict.get("frames", [])]
+        trace_entry.frames = [Frame.from_dict(_frame_dict) for _frame_dict in trace_dict.get("frames", [])]
         return trace_entry
 
     def to_dict(self):
@@ -130,6 +130,9 @@ class Block:
         )
         return block
 
+    def valid_sub_block(self, addr, size):
+        return self.address <= addr and addr + size <= self.address + self.size
+
     def to_dict(self):
         return dict(
             size=self.size,
@@ -163,6 +166,7 @@ class Segment:
     @classmethod
     def from_dict(cls, segment_dict: dict):
         segment = cls()
+        segment.seg_block_map = {}
         segment.address = segment_dict["address"]
         segment.total_size = segment_dict["total_size"]
         segment.stream = segment_dict["stream"]
@@ -183,6 +187,7 @@ class Segment:
     @classmethod
     def build_from_event(cls, event: TraceEntry):
         segment = cls()
+        segment.seg_block_map = {}
         segment.address = event.addr
         segment.total_size = event.size
         segment.stream = event.stream
@@ -214,7 +219,7 @@ class Segment:
     def find_block_idx_by_block_addr(self, block_addr: int):
         left = 0
         right = len(self.blocks) - 1
-        while left < right:
+        while left <= right:
             mid = (left + right) // 2
             if block_addr < self.blocks[mid].address:
                 right = mid - 1
@@ -233,7 +238,7 @@ class DeviceSnapshot:
     @classmethod
     def from_dict(cls, device_snapshot_dict: dict, device: int = 0):
         segments_dict = device_snapshot_dict["segments"]
-        device_trace_list = device_snapshot_dict["trace_entries"][device]
+        device_trace_list = device_snapshot_dict["device_traces"][device]
         snapshot = cls()
         snapshot.segments = []
         snapshot.trace_entries = []
@@ -242,6 +247,7 @@ class DeviceSnapshot:
         for segment_dict in segments_dict:
             _segment = Segment.from_dict(segment_dict)
             snapshot.block_map |= _segment.seg_block_map
+            snapshot.segments.append(_segment)
         snapshot.segments.sort(key=lambda segment: segment.address)
         # 读取事件序列
         for idx, trace_entry_dict in enumerate(device_trace_list):
