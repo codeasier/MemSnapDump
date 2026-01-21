@@ -30,7 +30,6 @@ pytorch社区提供了snapshot数据可视化的工具[memory_viz](https://pytor
 - 从第x1个事件到第x2个事件的序列：`evt[x1:x2]`
 
 对于任意时刻dump出的内存快照数据，假设其在dump前一共记录了X个内存事件，那么该内存快照实际承载的数据可以简单表示为
-
 `state.X + evt[1:X]`
 ## 2. 核心功能说明
 ### 2.1 快照回放
@@ -118,11 +117,13 @@ python dump.py [-h] [--device DEVICE] [--slices SLICES] [--max_entries MAX_ENTRI
 #### 2.3.4 示例
 假设已有采集自`0`卡的snapshot文件`/data/snapshot.pickle`，其包含**61**个内存事件，其采集时刻的数据可以表示为：`state.61 + evt[1:61]`
 
-_**方式一**_：按照固定切片数进行切片
+_**方式一：按照固定切片数进行切片**_
 
 以切分4份为例，执行如下命令：
 
-`python dump.py /data/snapshot.pickle --slices 4`
+```shell
+ python dump.py /data/snapshot.pickle --slices 4
+```
 
 将 61 个事件平均分为 4 个切片，每个切片约 15–16 个事件。 每段输出：该段结束时的内存状态 + 本段包含的事件列表。
 
@@ -133,10 +134,12 @@ _**方式一**_：按照固定切片数进行切片
 | 3    | `state.45` | `evt[30:45]` | 16       | slice_3_entry_30_45.pkl |
 | 4    | `state.61` | `evt[46:61]` | 16       | slice_4_entry_46_61.pkl |
 
-_**方式二**_：固定单片最大事件数切片
+_**方式二：固定单片最大事件数切片**_
 
 以每片最大20个事件为例，执行如下命令
-`python dump.py /data/snapshot.pickle --max_entries 20`
+```shell
+python dump.py /data/snapshot.pickle --max_entries 20
+```
 
 | 切片 | 内存状态       | 事件范围         | 事件数量 | 输出件 |
 |------|------------|--------------|------| ------ |
