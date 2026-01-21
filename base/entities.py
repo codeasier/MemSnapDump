@@ -116,7 +116,7 @@ class Block:
             requested_size=block_dict["requested_size"],
             address=block_dict["address"],
             state=block_dict["state"],
-            frames=[frame.to_dict() for frame in block_dict.get("frames", [])]
+            frames=[Frame.from_dict(frame) for frame in block_dict.get("frames", [])]
         )
         return block
 
@@ -260,16 +260,16 @@ class DeviceSnapshot:
             'device_traces': [[trace.to_dict() for trace in self.trace_entries]]
         }
 
-    def find_segment_by_block_addr(self, block_addr: int) -> Optional[Segment]:
+    def find_segment_idx_by_addr(self, addr: int) -> int:
         left = 0
         segments = self.segments
         right = len(segments) - 1
         while left <= right:
             mid = (left + right) // 2
-            if block_addr < segments[mid].address:
+            if addr < segments[mid].address:
                 right = mid - 1
-            elif block_addr >= segments[mid].address + segments[mid].total_size:
+            elif addr >= segments[mid].address + segments[mid].total_size:
                 left = mid + 1
             else:
-                return segments[mid]
-        return None
+                return mid
+        return -1
