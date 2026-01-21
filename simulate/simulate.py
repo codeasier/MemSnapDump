@@ -80,92 +80,122 @@ class SimulateDeviceSnapshot:
             self._free_block(event.addr)
         elif event.action in ["segment_free", "segment_unmap"]:
             _segment = Segment.build_from_event(event)
-            self._map_segment(_segment, merge=event.action == "segment_unmap")
+            self._alloc_or_map_segment(_segment, merge=event.action == "segment_unmap")
             self.device_snapshot.block_map |= _segment.seg_block_map
-        elif event.action in ["segment_alloc", "segment"]:
-            self._unmap_segment(event.addr, merge=event.action == "segment_map")
+        elif event.action == "segment_alloc":
+            self._free_segment(event.addr)
+        elif event.action == "segment_map":
+            self._unmap_segment(event.addr, event.size)
         else:
             replay_logger.warning(f"Skip event{event.to_dict()} during replay.")
 
-    def _map_segment(self, segment: Segment, merge: bool = False):
+    def reorganize_segment_blocks(self, segment: Segment):
+        seg_addr_end = segment.address + segment.total_size
+        idx = 0
+        # 自左向右
+        while idx < len(segment.blocks):
+            cur_block = segment.blocks[idx]
+            cur_block_addr_end = cur_block.address + cur_block.size
+            if not (segment.address <= cur_block.address and cur_block_addr_end <= seg_addr_end):
+                del segment.blocks[idx]
+            else:
+                idx += 1
+        offset_start = segment.address
+        for block in segment.blocks:
+            if block.address != offset_start:
+                replay_logger.error("Reorganize segment blocks failed.")
+            offset_start += block.size
+        if offset_start != seg_addr_end:
+            replay_logger.error("Reorganize segment blocks failed.")
+
+    def _alloc_or_map_segment(self, segment: Segment, merge: bool = False):
         """
-            回放时模拟alloc/map一个新的内存段
+            回放时模拟alloc或map一个新的内存段
         :param segment: 新内存段
-        :param merge: 是否开启合并（虚拟内存场景），缺省不合并
+        :param merge: 是否合并，map时对应虚拟内存场景，否则仅为alloc
         """
         segments = self.device_snapshot.segments
         idx = bisect.bisect_left([seg.address for seg in segments], segment.address)
         segments.insert(idx, segment)
-        # 非虚拟内存场景
         if not merge:
             return
-            # 虚拟内存，非段列表尾部场景
+            # 判断能否与后一个segment进行合并
         if idx + 1 < len(segments):
             next_seg = segments[idx + 1]
-            if segment.stream != next_seg.stream:
-                return
-                # 如果首尾相接
-            if segment.address + segment.total_size == next_seg.address:
+            # 如相同流且 当前seg的尾与next_seg头相接
+            if segment.stream == next_seg.stream and segment.address + segment.total_size == next_seg.address:
                 segment.total_size += next_seg.total_size
                 segment.blocks += next_seg.blocks
                 del segments[idx + 1]
+        # 判断能否与前一个seg进行合并
+        if idx == 0:
             return
-            # 虚拟内存，且在段列表尾部
-        prev = segments[idx - 1] if idx > 0 else None
-        if segment.stream != prev.stream:
-            return
-        if prev and segment.address == prev.address + prev.total_size:
-            prev.total_size += segment.total_size
-            prev.blocks += segment.blocks
+        prev_seg = segments[idx - 1]
+        # 如相同流且 当前seg的头与prev_seg尾相接
+        if segment.stream == prev_seg.stream and segment.address == prev_seg.address + prev_seg.total_size:
+            prev_seg.total_size += segment.total_size
+            prev_seg.blocks += segment.blocks
             del segments[idx - 1]
 
-    def _unmap_segment(self, seg_addr, merge: bool = False):
+    def _free_segment(self, seg_addr: int):
         """
-            回放时模拟free/unmap一个已有的内存段（虚拟内存场景可能是被合并过之后的大段的某一段）
+            回放时模拟free一个内存段（非虚拟内存场景）
+        :param seg_addr: 待释放段地址
+        """
+        _error = "Free segment failed"
+        idx = self.device_snapshot.find_segment_idx_by_addr(seg_addr)
+        if idx < 0 or idx >= len(self.device_snapshot.segments):
+            replay_logger.error(f"{_error}: cannot found segment(addr={seg_addr})")
+            return
+        exist_seg = self.device_snapshot.segments[idx]
+        if exist_seg.address != seg_addr:
+            replay_logger.error(f"{_error}: cannot free segment(addr={seg_addr}) in exist segment({exist_seg.address})")
+            return
+        del self.device_snapshot.segments[idx]
+
+    def _unmap_segment(self, seg_addr: int, unmap_size: int):
+        """
+            回放时模拟unmap一个已有的内存段（虚拟内存场景）
         :param seg_addr: 待释放段的地址
-        :param merge: 是否虚拟内存场景
+        :param unmap_size: 待unmap的大小
         """
         _error = "Unmap segment failed"
         segments = self.device_snapshot.segments
-        idx = bisect.bisect_left([seg.address for seg in segments], seg_addr)
-        if idx == len(segments) or (idx == 0 and segments[idx].address != seg_addr):
+        exist_seg_idx = self.device_snapshot.find_segment_idx_by_addr(seg_addr)
+        if exist_seg_idx < 0 or exist_seg_idx >= len(segments):
             replay_logger.error(f"{_error}: cannot found segment(addr={seg_addr})")
             return
-        # 非合并场景，直接找到内存地址相同的段并删除
-        if not merge:
-            del segments[idx]
+        exist_seg = segments[exist_seg_idx]
+        if not (seg_addr >= exist_seg.address and seg_addr + unmap_size <= exist_seg.address + exist_seg.total_size):
+            replay_logger.error(
+                f"{_error}: cannot unmap segment(addr={seg_addr}, unmap_size={unmap_size}) in exist segment("
+                f"addr={exist_seg.address}, total_size={exist_seg.total_size})")
             return
-        seg = segments[idx]
-        # 合并场景，找到第一个内存地址+size包含了该内存段的segment
-        existing_seg_idx = -1
-        seg_address_end = seg.address + seg.total_size
-        for i in range(len(segments) - 1, -1, -1):
-            _seg = segments[i]
-            if _seg.address <= seg.address < seg_address_end <= _seg.address + _seg.total_size:
-                existing_seg_idx = i
-                break
-        if existing_seg_idx == -1:
-            replay_logger.error(f"{_error}: cannot found segment(addr={seg_addr})")
-            return
-        existing_seg = segments[existing_seg_idx]
-        existing_seg_addr_end = existing_seg.address + existing_seg.total_size
+        exist_seg_addr_end = exist_seg.address + exist_seg.total_size
+        unmap_seg_addr_end = seg_addr + unmap_size
         # 如果待释放的内存段在找到的内存段的开头对齐
-        if existing_seg.address == seg.address:
-            existing_seg.address = seg_address_end
-            existing_seg.total_size -= seg.total_size
+        if exist_seg.address == seg_addr:
+            exist_seg.address = unmap_seg_addr_end
+            exist_seg.total_size -= unmap_size
             # 如果释放后内存段size为0，则直接删除
-            if existing_seg.total_size <= 0:
-                del segments[existing_seg_idx]
+            if exist_seg.total_size <= 0:
+                del segments[exist_seg_idx]
                 return
-                # 如果待释放的内存段在找到的内存段的结尾对齐
-        if existing_seg_addr_end == seg_address_end:
-            existing_seg.total_size -= seg.total_size
+        # 如果待释放的内存段在找到的内存段的结尾对齐
+        if exist_seg_addr_end == unmap_seg_addr_end:
+            exist_seg.total_size -= unmap_size
             return
-            # 在中间的场景
-        existing_seg.total_size = seg.address - existing_seg.address
-        seg.address = seg_address_end
-        seg.total_size = existing_seg_addr_end - seg_address_end
-        segments.insert(existing_seg_idx + 1, seg)
+        # 在中间的场景
+        exist_seg.total_size = seg_addr - exist_seg.address
+        remain_seg = Segment()
+        remain_seg.address = unmap_seg_addr_end
+        remain_seg.total_size = exist_seg_addr_end - unmap_seg_addr_end
+        remain_seg.stream = exist_seg.stream
+        remain_seg.frames = exist_seg.frames
+        remain_seg.blocks = exist_seg.blocks
+        self.reorganize_segment_blocks(exist_seg)
+        self.reorganize_segment_blocks(remain_seg)
+        segments.insert(exist_seg_idx + 1, remain_seg)
 
     def _alloc_block(self, block: Block, align_size: int = 512):
         """
@@ -177,10 +207,11 @@ class SimulateDeviceSnapshot:
         # 新块按照512对齐拆分
         block.size = math.ceil(block.requested_size / align_size) * align_size
         # 将block在所属segment中分配
-        _segment = self.device_snapshot.find_segment_by_block_addr(block.address)
-        if _segment is None:
+        seg_idx = self.device_snapshot.find_segment_idx_by_addr(block.address)
+        if seg_idx == -1:
             replay_logger.error(f"{_error}: cannot found the segment to which the block belongs, {block.to_dict()}")
             return
+        _segment = self.device_snapshot.segments[seg_idx]
         idx = _segment.find_block_idx_by_block_addr(block.address)
         existing_block = _segment.blocks[idx]
         if existing_block.state != BlockState.INACTIVE:
@@ -230,10 +261,11 @@ class SimulateDeviceSnapshot:
         :param block_addr: 待释放block的地址
         """
         _error = "Failed to simulate free block"
-        _segment = self.device_snapshot.find_segment_by_block_addr(block_addr)
-        if _segment is None:
+        _seg_idx = self.device_snapshot.find_segment_idx_by_addr(block_addr)
+        if _seg_idx is None:
             replay_logger.error(f"{_error}: cannot found the segment to which the block belongs, {block_addr}")
             return
+        _segment = self.device_snapshot.segments[_seg_idx]
         idx = bisect.bisect_left([_block.address for _block in _segment.blocks], block_addr)
         if _segment.blocks[idx].address != block_addr:
             replay_logger.error(f"{_error}: cannot found block addr={block_addr}(hex={hex(block_addr)} "
