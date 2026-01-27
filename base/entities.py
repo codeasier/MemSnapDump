@@ -56,6 +56,7 @@ class TraceEntry:
     # memory npu still reports to be free
 
     _origin: dict = None  # Readonly
+    idx: int = -1 # 索引，全局唯一
 
     @classmethod
     def from_dict(cls, trace_dict: dict):
@@ -67,6 +68,11 @@ class TraceEntry:
         trace_entry._origin = trace_dict
         trace_entry.frames = [Frame.from_dict(_frame_dict) for _frame_dict in trace_dict.get("frames", [])]
         return trace_entry
+
+    def get_callstack(self):
+        if not self.frames:
+            return ""
+        return "\n".join([f"{frame.filename}:{frame.line} {frame.name}" for frame in self.frames])[1:-1]
 
     def to_dict(self):
         return self._origin if self._origin else dict(
@@ -99,6 +105,8 @@ class Block:
 
     # 指向持有该block的segment对象
     segment_ptr: Any = None
+    free_event_idx = None
+    alloc_event_idx = None
 
     def __init__(self, size: int, requested_size: int, address: int, state=BlockState.INACTIVE, frames=None):
         if frames is None:
@@ -118,6 +126,8 @@ class Block:
             state=block_dict["state"],
             frames=[Frame.from_dict(frame) for frame in block_dict.get("frames", [])]
         )
+        if block.state != BlockState.INACTIVE:
+            block.free_event_idx = -1 # 代表dump时刻仍然未释放的
         return block
 
     @classmethod
@@ -161,6 +171,8 @@ class Segment:
     frames: List[Frame] = []
 
     _origin: dict = None  # Readonly
+    free_or_unmap_event_idx = None
+    alloc_or_map_event_idx = None
     seg_block_map: Dict[int, Block] = {}
 
     @classmethod
@@ -182,6 +194,7 @@ class Segment:
             _block.segment_ptr = segment
             segment.seg_block_map[_block.address] = _block
             segment.blocks.append(_block)
+        segment.free_or_unmap_event_idx = -1 # 代表dump时刻仍未释放的
         return segment
 
     @classmethod
@@ -251,7 +264,9 @@ class DeviceSnapshot:
         snapshot.segments.sort(key=lambda segment: segment.address)
         # 读取事件序列
         for idx, trace_entry_dict in enumerate(device_trace_list):
-            snapshot.trace_entries.append(TraceEntry.from_dict(trace_entry_dict))
+            trace_entry = TraceEntry.from_dict(trace_entry_dict)
+            trace_entry.idx = idx
+            snapshot.trace_entries.append(trace_entry)
         return snapshot
 
     def to_dict(self):
