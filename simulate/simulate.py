@@ -1,4 +1,5 @@
 import bisect
+import copy
 import math
 from abc import ABC, abstractmethod
 from typing import Dict
@@ -17,18 +18,80 @@ class SimulateHooker(ABC):
         """
             【READONLY】在回放事件前回调，此时事件列表**并未POP**出该事件
         :param wait4undo_event: （只读）待回放的事件（仍在事件列表中）
-        :param current_snapshot: （制度）当前的内存块快照
+        :param current_snapshot: （只读）当前的内存块快照
         :return 返回true继续执行，返回false将中断
         """
         ...
 
     @abstractmethod
-    def post_undo_event(self, already_undo_event: TraceEntry, current_snapshot: DeviceSnapshot):
+    def post_undo_event(self, already_undo_event: TraceEntry, current_snapshot: DeviceSnapshot) -> bool:
         """
             【READONLY】在回放事件后回调，此时snapshot已经将该事件从事件列表中丢弃，且segments已回放到事件发生前
         :param already_undo_event: 已回放的事件
         :param current_snapshot: （只读）当前内存快照
         :return 返回true继续执行，返回false将中断
+        """
+        ...
+
+    def pre_replay_alloc_block(self, wait4alloc_block: Block, current_snapshot: DeviceSnapshot):
+        """
+            在**回放时**分配一个内存块**前**回调，对应一个内存块释放事件回滚前
+        :param wait4alloc_block: 待分配的block
+        :param current_snapshot: 【只读】当前内存快照
+        """
+        ...
+
+    def post_replay_alloc_block(self, allocated_block: Block, current_snapshot: DeviceSnapshot):
+        """
+            在**回放时**分配一个内存块**后**回调，对应一个内存块释放事件回滚后
+        :param allocated_block: 【只读】新分配的block
+        :param current_snapshot:【只读】分配block前内存快照
+        """
+        ...
+
+    def pre_replay_free_block(self, wait4free_block: Block, current_snapshot: DeviceSnapshot):
+        """
+            在**回放时**释放一个内存块**前**回调，对应一个内存块申请事件回滚前
+        :param wait4free_block: 【只读】待释放的block
+        :param current_snapshot: 【只读】释放block前内存快照
+        """
+        ...
+
+    def post_replay_free_block(self, released_block: Block, current_snapshot: DeviceSnapshot):
+        """
+            在回放时，释放一个内存块**后**回调，对应一个内存块申请事件回滚后
+        :param released_block: 【副本】已释放的block（副本）
+        :param current_snapshot: 【只读】释放block后内存快照
+        """
+        ...
+
+    def pre_replay_map_or_alloc_segment(self, wait4alloc_map_segment: Segment, current_snapshot: DeviceSnapshot):
+        """
+            在回放时，分配或映射一个内存段**前**回调，对应一个内存段释放或unmap事件回滚前
+        :param wait4alloc_map_segment: 【只读】待分配或map的内存段
+        :param current_snapshot: 分配或map内存段前的内存快照
+        """
+
+    def post_replay_map_or_alloc_segment(self, allocated_mapped_segment: Segment, current_snapshot: DeviceSnapshot):
+        """
+            在回放时，分配或映射一个内存段**后**回调，对应一个内存段释放或unmap事件回滚后
+        :param allocated_mapped_segment:【副本】已分配或map的内存段
+        :param current_snapshot: 分配或map内存段后的内存快照
+        """
+
+    def pre_replay_unmap_or_free_segment(self, wait4release_segment: Segment, current_snapshot: DeviceSnapshot):
+        """
+            在回放时，释放或unmap一个内存段**前**回调，对应一个内存段申请或map事件前
+        :param wait4release_segment:【只读】待释放的内存段
+        :param current_snapshot: 释放或unmap内存段前的内存快照
+        """
+        ...
+
+    def post_replay_unmap_or_free_segment(self, released_segment: Segment, current_snapshot: DeviceSnapshot):
+        """
+            在回放时，释放或unmap一个内存段**后**回调，对应一个内存段申请或map事件后
+        :param released_segment:【副本】已释放的内存段
+        :param current_snapshot: 释放或unmap内存段后的内存快照
         """
         ...
 
@@ -60,13 +123,14 @@ class SimulateDeviceSnapshot:
         while self.device_snapshot.trace_entries:
             for hooker in self.hookers.values():
                 if hooker and not hooker.pre_undo_event(self.device_snapshot.trace_entries[-1], self.device_snapshot):
-                    replay_logger.error(f"An interruption occurred during the replay of the pre hook.")
+                    replay_logger.error(f"An interruption occurred during the replay of the single event pre hook.")
                     return
-            event = self.device_snapshot.trace_entries.pop()
+            event = self.device_snapshot.trace_entries[-1]
             self._replay_single_event(event)
+            self.device_snapshot.trace_entries.pop()
             for hooker in self.hookers.values():
                 if hooker and not hooker.post_undo_event(event, self.device_snapshot):
-                    replay_logger.error(f"An interruption occurred during the replay of the post hook.")
+                    replay_logger.error(f"An interruption occurred during the replay of the single event post hook.")
                     return
 
     def _replay_single_event(self, event: TraceEntry):
@@ -116,7 +180,10 @@ class SimulateDeviceSnapshot:
         """
         segments = self.device_snapshot.segments
         idx = bisect.bisect_left([seg.address for seg in segments], segment.address)
+        for hooker in self.hookers.values():
+            hooker.pre_replay_map_or_alloc_segment(segment, self.device_snapshot)
         segments.insert(idx, segment)
+        allocated_or_mapped_segment_copy = copy.copy(segment)
         if not merge:
             return
             # 判断能否与后一个segment进行合并
@@ -129,6 +196,8 @@ class SimulateDeviceSnapshot:
                 del segments[idx + 1]
         # 判断能否与前一个seg进行合并
         if idx == 0:
+            for hooker in self.hookers.values():
+                hooker.post_replay_map_or_alloc_segment(allocated_or_mapped_segment_copy, self.device_snapshot)
             return
         prev_seg = segments[idx - 1]
         # 如相同流且 当前seg的头与prev_seg尾相接
@@ -136,6 +205,8 @@ class SimulateDeviceSnapshot:
             prev_seg.total_size += segment.total_size
             prev_seg.blocks += segment.blocks
             del segments[idx - 1]
+        for hooker in self.hookers.values():
+            hooker.post_replay_map_or_alloc_segment(allocated_or_mapped_segment_copy, self.device_snapshot)
 
     def _free_segment(self, seg_addr: int):
         """
@@ -151,7 +222,12 @@ class SimulateDeviceSnapshot:
         if exist_seg.address != seg_addr:
             replay_logger.error(f"{_error}: cannot free segment(addr={seg_addr}) in exist segment({exist_seg.address})")
             return
+        for hooker in self.hookers.values():
+            hooker.pre_replay_unmap_or_free_segment(self.device_snapshot.segments[idx], self.device_snapshot)
+        released_segment_copy = copy.copy(self.device_snapshot.segments[idx])
         del self.device_snapshot.segments[idx]
+        for hooker in self.hookers.values():
+            hooker.post_replay_unmap_or_free_segment(released_segment_copy, self.device_snapshot)
 
     def _unmap_segment(self, seg_addr: int, unmap_size: int):
         """
@@ -171,6 +247,9 @@ class SimulateDeviceSnapshot:
                 f"{_error}: cannot unmap segment(addr={seg_addr}, unmap_size={unmap_size}) in exist segment("
                 f"addr={exist_seg.address}, total_size={exist_seg.total_size})")
             return
+        for hooker in self.hookers.values():
+            hooker.pre_replay_unmap_or_free_segment(exist_seg, self.device_snapshot)
+        released_segment_copy = copy.copy(exist_seg)
         exist_seg_addr_end = exist_seg.address + exist_seg.total_size
         unmap_seg_addr_end = seg_addr + unmap_size
         # 如果待释放的内存段在找到的内存段的开头对齐
@@ -180,10 +259,14 @@ class SimulateDeviceSnapshot:
             # 如果释放后内存段size为0，则直接删除
             if exist_seg.total_size <= 0:
                 del segments[exist_seg_idx]
+                for hooker in self.hookers.values():
+                    hooker.post_replay_unmap_or_free_segment(released_segment_copy, self.device_snapshot)
                 return
         # 如果待释放的内存段在找到的内存段的结尾对齐
         if exist_seg_addr_end == unmap_seg_addr_end:
             exist_seg.total_size -= unmap_size
+            for hooker in self.hookers.values():
+                hooker.post_replay_unmap_or_free_segment(released_segment_copy, self.device_snapshot)
             return
         # 在中间的场景
         exist_seg.total_size = seg_addr - exist_seg.address
@@ -196,6 +279,8 @@ class SimulateDeviceSnapshot:
         self.reorganize_segment_blocks(exist_seg)
         self.reorganize_segment_blocks(remain_seg)
         segments.insert(exist_seg_idx + 1, remain_seg)
+        for hooker in self.hookers.values():
+            hooker.post_replay_unmap_or_free_segment(released_segment_copy, self.device_snapshot)
 
     def _alloc_block(self, block: Block, align_size: int = 512):
         """
@@ -221,26 +306,31 @@ class SimulateDeviceSnapshot:
             replay_logger.error(f"{_error}: an abnormal block was found whose address is higher than the "
                                 f"existing block's offset address: {block.to_dict()}")
             return
+        for hooker in self.hookers.values():
+            hooker.pre_replay_alloc_block(block, self.device_snapshot)
         # 处理块拆分
         total_size = existing_block.size
         # 左对齐
         if existing_block.address == block.address:
+            existing_block.state = block.state
+            existing_block.frames = block.frames
+            existing_block.requested_size = block.requested_size
             # 相同大小，则直接修改为新状态即可
             if existing_block.size == block.size:
-                existing_block.state = block.state
+                for hooker in self.hookers.values():
+                    hooker.post_replay_alloc_block(existing_block, self.device_snapshot)
                 return
             # 大小不同，需要拆分，原block基地址+新blocksize作为新block
             existing_block.size = block.size
-            existing_block.state = block.state
             block.size = total_size - block.size
             block.address = existing_block.address + existing_block.size
             block.state = BlockState.INACTIVE
             _segment.blocks.insert(idx + 1, block)
             self.device_snapshot.block_map[block.address] = block
+            for hooker in self.hookers.values():
+                hooker.post_replay_alloc_block(existing_block, self.device_snapshot)
             return
         # 左侧未对齐
-        total_size = existing_block.size
-        existing_block.state = BlockState.INACTIVE
         existing_block.size = block.address - existing_block.address
         _segment.blocks.insert(idx + 1, block)
         self.device_snapshot.block_map[block.address] = block
@@ -254,6 +344,8 @@ class SimulateDeviceSnapshot:
             )
             _segment.blocks.insert(idx + 2, r_block)
             self.device_snapshot.block_map[r_block.address] = r_block
+        for hooker in self.hookers.values():
+            hooker.post_replay_alloc_block(block, self.device_snapshot)
 
     def _free_block(self, block_addr: int):
         """
@@ -272,7 +364,10 @@ class SimulateDeviceSnapshot:
                                 f"in segment {_segment.to_dict()}")
             return
         # 前向查找inactive
+        for hooker in self.hookers.values():
+            hooker.pre_replay_free_block(_segment.blocks[idx], self.device_snapshot)
         _segment.blocks[idx].state = BlockState.INACTIVE
+        released_block_copy = copy.copy(_segment.blocks[idx])
         start = idx
         while start >= 1:
             if _segment.blocks[start - 1].state != BlockState.INACTIVE:
@@ -282,3 +377,5 @@ class SimulateDeviceSnapshot:
             _segment.blocks[start].size += _segment.blocks[start + 1].size
             del self.device_snapshot.block_map[_segment.blocks[start + 1].address]
             del _segment.blocks[start + 1]
+        for hooker in self.hookers.values():
+            hooker.pre_replay_free_block(released_block_copy, self.device_snapshot)
