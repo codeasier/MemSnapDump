@@ -99,7 +99,7 @@ if __name__ == '__main__':
 
 ### 2.2 快照切片
 #### 2.2.1 简介
-快照切片是一个典型的基于快照回放实现的功能，可参考`dump.py`中对于`SliceDumpHooker`的实现。
+快照切片是一个典型的基于快照回放实现的功能，可参考`tools/slice_dump/hooker.py`中对于`SliceDumpHooker`的实现。
 
 当前可按照事件顺序平均切分固定个数，或按照固定最大事件数量，对快照文件进行切分。在采集的数据量较大的情况下，可通过该脚本进行剪裁后先局部细节分析。
 #### 2.2.2 使用约束
@@ -107,7 +107,8 @@ if __name__ == '__main__':
 #### 2.2.3 使用方式
 ```shell
 # 在项目根目录下执行
-python dump.py [-h] [--device DEVICE] [--slices SLICES] [--max_entries MAX_ENTRIES] [--dump_dir DUMP_DIR] [--dump_type {pkl,json}] snapshot_file
+python tools.split [-h] [--device DEVICE] [--slices SLICES] [--max_entries MAX_ENTRIES] [--dump_dir DUMP_DIR] 
+[--dump_type {pkl,json}] snapshot_file
 ```
   | 参数                  | 类型 | 必填 | 默认值            | 说明                                                                    |
   |---------------------|------|------|----------------|-----------------------------------------------------------------------|
@@ -125,7 +126,7 @@ _**方式一：按照固定切片数进行切片**_
 以切分4份为例，执行如下命令：
 
 ```shell
- python dump.py /data/snapshot.pickle --slices 4
+ python tools.split /data/snapshot.pickle --slices 4
 ```
 
 将 61 个事件平均分为 4 个切片，每个切片约 15–16 个事件。 每段输出：该段结束时的内存状态 + 本段包含的事件列表。
@@ -141,7 +142,7 @@ _**方式二：固定单片最大事件数切片**_
 
 以每片最大20个事件为例，执行如下命令
 ```shell
-python dump.py /data/snapshot.pickle --max_entries 20
+python tools.split /data/snapshot.pickle --max_entries 20
 ```
 
 | 切片 | 内存状态       | 事件范围         | 事件数量 | 输出件 |
@@ -163,10 +164,22 @@ MemSnapDump/
 │   ├── __init__.py     
 │   └── simulate.py     # 主要类：SimulateDeviceSnapshot，负责事件回放与 hook 注册
 │
+├── tools/                 # 工具模块：提供核心功能命令行工具
+│   └── slice_dump/        # 快照剪裁工具核心实现
+│       ├── __init__.py
+│       ├── dump.py        # 命令行参数定义与解析
+│       └── hooker.py      # 实现快照剪裁的核心回放钩子
+│   └── split.py       # 命令行代理
+│
 ├── util/               # 工具函数与辅助模块
 │   ├── __init__.py     
 │   └── logger.py       # 日志模块
 │
-├── dump.py             # 快照剪裁脚本
+├── test/                  # 测试代码
+│   ├── test-data/         # 测试用例的数据文件
+│   ├── common.py          # 测试用例中的公共方法
+│   ├── simulate_test.py   # 快照回放模块的单元测试
+│   └── slice_dump_test.py # 快照剪裁工具的单元测试
+│
 └── README.md           # 项目说明文档
 ```
