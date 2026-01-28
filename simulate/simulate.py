@@ -139,7 +139,7 @@ class SimulateDeviceSnapshot:
             _block.state = BlockState.ACTIVE_ALLOCATED if event.action == "free" else BlockState.ACTIVE_PENDING_FREE
             self._alloc_block(_block)
         elif event.action == "free_requested":
-            self.device_snapshot.block_map[event.addr].state = BlockState.ACTIVE_ALLOCATED
+            self._active_block(event.addr)
         elif event.action == "alloc":
             self._free_block(event.addr)
         elif event.action in ["segment_free", "segment_unmap"]:
@@ -154,20 +154,37 @@ class SimulateDeviceSnapshot:
             replay_logger.warning(f"Skip event{event.to_dict()} during replay.")
 
     def reorganize_segment_blocks(self, segment: Segment):
+        err = "Reorganize segment blocks failed"
         seg_addr_end = segment.address + segment.total_size
+        segment.allocated_size = 0
         idx = 0
         # 自左向右
         while idx < len(segment.blocks):
             cur_block = segment.blocks[idx]
             cur_block_addr_end = cur_block.address + cur_block.size
-            if not (segment.address <= cur_block.address and cur_block_addr_end <= seg_addr_end):
+            if cur_block_addr_end <= segment.address or cur_block.address > seg_addr_end:
                 del segment.blocks[idx]
-            else:
+                continue
+            # 正常内部block
+            if segment.address <= cur_block.address and cur_block_addr_end <= seg_addr_end:
                 idx += 1
+                continue
+            if cur_block.state != BlockState.INACTIVE:
+                replay_logger.error(f"{err}: an abnormal active block occurred whose address range exceeds the "
+                                    f"segment.")
+                return
+            # 可能出现inactive内存块范围与address有交集，需要resize
+            if cur_block.address < segment.address:
+                cur_block.size -= (segment.address - cur_block.address)
+                cur_block.address = segment.address
+            if cur_block_addr_end > seg_addr_end:
+                cur_block.size -= (cur_block_addr_end - seg_addr_end)
         offset_start = segment.address
         for block in segment.blocks:
             if block.address != offset_start:
                 replay_logger.error("Reorganize segment blocks failed.")
+            if block.state != BlockState.INACTIVE:
+                segment.allocated_size += block.size
             offset_start += block.size
         if offset_start != seg_addr_end:
             replay_logger.error("Reorganize segment blocks failed.")
@@ -182,6 +199,8 @@ class SimulateDeviceSnapshot:
         idx = bisect.bisect_left([seg.address for seg in segments], segment.address)
         for hooker in self.hookers.values():
             hooker.pre_replay_map_or_alloc_segment(segment, self.device_snapshot)
+        segment.allocated_size = 0
+        self.device_snapshot.total_reserved += segment.total_size
         segments.insert(idx, segment)
         allocated_or_mapped_segment_copy = copy.copy(segment)
         if not merge:
@@ -192,6 +211,8 @@ class SimulateDeviceSnapshot:
             # 如相同流且 当前seg的尾与next_seg头相接
             if segment.stream == next_seg.stream and segment.address + segment.total_size == next_seg.address:
                 segment.total_size += next_seg.total_size
+                segment.allocated_size += next_seg.allocated_size
+                segment.active_size += next_seg.active_size
                 segment.blocks += next_seg.blocks
                 del segments[idx + 1]
         # 判断能否与前一个seg进行合并
@@ -204,7 +225,9 @@ class SimulateDeviceSnapshot:
         if segment.stream == prev_seg.stream and segment.address == prev_seg.address + prev_seg.total_size:
             prev_seg.total_size += segment.total_size
             prev_seg.blocks += segment.blocks
-            del segments[idx - 1]
+            prev_seg.active_size += segment.active_size
+            prev_seg.allocated_size += segment.allocated_size
+            del segments[idx]
         for hooker in self.hookers.values():
             hooker.post_replay_map_or_alloc_segment(allocated_or_mapped_segment_copy, self.device_snapshot)
 
@@ -224,10 +247,11 @@ class SimulateDeviceSnapshot:
             return
         for hooker in self.hookers.values():
             hooker.pre_replay_unmap_or_free_segment(self.device_snapshot.segments[idx], self.device_snapshot)
-        released_segment_copy = copy.copy(self.device_snapshot.segments[idx])
+        self.device_snapshot.total_reserved -= exist_seg.total_size
+        exist_seg.total_size = 0
         del self.device_snapshot.segments[idx]
         for hooker in self.hookers.values():
-            hooker.post_replay_unmap_or_free_segment(released_segment_copy, self.device_snapshot)
+            hooker.post_replay_unmap_or_free_segment(exist_seg, self.device_snapshot)
 
     def _unmap_segment(self, seg_addr: int, unmap_size: int):
         """
@@ -249,24 +273,26 @@ class SimulateDeviceSnapshot:
             return
         for hooker in self.hookers.values():
             hooker.pre_replay_unmap_or_free_segment(exist_seg, self.device_snapshot)
-        released_segment_copy = copy.copy(exist_seg)
+        self.device_snapshot.total_reserved -= unmap_size
         exist_seg_addr_end = exist_seg.address + exist_seg.total_size
         unmap_seg_addr_end = seg_addr + unmap_size
         # 如果待释放的内存段在找到的内存段的开头对齐
         if exist_seg.address == seg_addr:
             exist_seg.address = unmap_seg_addr_end
             exist_seg.total_size -= unmap_size
+            self.reorganize_segment_blocks(exist_seg)
             # 如果释放后内存段size为0，则直接删除
             if exist_seg.total_size <= 0:
                 del segments[exist_seg_idx]
                 for hooker in self.hookers.values():
-                    hooker.post_replay_unmap_or_free_segment(released_segment_copy, self.device_snapshot)
+                    hooker.post_replay_unmap_or_free_segment(exist_seg, self.device_snapshot)
                 return
         # 如果待释放的内存段在找到的内存段的结尾对齐
         if exist_seg_addr_end == unmap_seg_addr_end:
             exist_seg.total_size -= unmap_size
+            self.reorganize_segment_blocks(exist_seg)
             for hooker in self.hookers.values():
-                hooker.post_replay_unmap_or_free_segment(released_segment_copy, self.device_snapshot)
+                hooker.post_replay_unmap_or_free_segment(exist_seg, self.device_snapshot)
             return
         # 在中间的场景
         exist_seg.total_size = seg_addr - exist_seg.address
@@ -280,7 +306,7 @@ class SimulateDeviceSnapshot:
         self.reorganize_segment_blocks(remain_seg)
         segments.insert(exist_seg_idx + 1, remain_seg)
         for hooker in self.hookers.values():
-            hooker.post_replay_unmap_or_free_segment(released_segment_copy, self.device_snapshot)
+            hooker.post_replay_unmap_or_free_segment(exist_seg, self.device_snapshot)
 
     def _alloc_block(self, block: Block, align_size: int = 512):
         """
@@ -308,6 +334,14 @@ class SimulateDeviceSnapshot:
             return
         for hooker in self.hookers.values():
             hooker.pre_replay_alloc_block(block, self.device_snapshot)
+        # 更新统计值
+        if block.state == BlockState.ACTIVE_PENDING_FREE:
+            _segment.active_size += block.size
+            self.device_snapshot.total_activated += block.size
+        elif block.state == BlockState.ACTIVE_ALLOCATED:
+            _segment.allocated_size += block.size
+            self.device_snapshot.total_allocated += block.size
+
         # 处理块拆分
         total_size = existing_block.size
         # 左对齐
@@ -366,6 +400,12 @@ class SimulateDeviceSnapshot:
         # 前向查找inactive
         for hooker in self.hookers.values():
             hooker.pre_replay_free_block(_segment.blocks[idx], self.device_snapshot)
+        exist_block = _segment.blocks[idx]
+        _segment.active_size -= exist_block.size
+        self.device_snapshot.total_activated -= exist_block.size
+        if exist_block.state == BlockState.ACTIVE_ALLOCATED:
+            _segment.allocated_size -= exist_block.size
+            self.device_snapshot.total_allocated -= _segment.blocks[idx].size
         _segment.blocks[idx].state = BlockState.INACTIVE
         released_block_copy = copy.copy(_segment.blocks[idx])
         start = idx
@@ -379,3 +419,24 @@ class SimulateDeviceSnapshot:
             del _segment.blocks[start + 1]
         for hooker in self.hookers.values():
             hooker.pre_replay_free_block(released_block_copy, self.device_snapshot)
+
+    def _active_block(self, block_addr: int):
+        """
+            回放时模拟active一个block
+        :param block_addr: 待释放block的地址
+        """
+        _error = "Failed to simulate active block"
+        _seg_idx = self.device_snapshot.find_segment_idx_by_addr(block_addr)
+        if _seg_idx is None:
+            replay_logger.error(f"{_error}: cannot found the segment to which the block belongs, {block_addr}")
+            return
+        exist_segment = self.device_snapshot.segments[_seg_idx]
+        idx = bisect.bisect_left([_block.address for _block in exist_segment.blocks], block_addr)
+        exist_block = exist_segment.blocks[idx]
+        if exist_block.address != block_addr or exist_block.state != BlockState.ACTIVE_PENDING_FREE:
+            replay_logger.error(f"{_error}: cannot found block addr={block_addr}(hex={hex(block_addr)} "
+                                f"in segment {exist_segment.to_dict()}")
+            return
+        exist_block.state = BlockState.ACTIVE_ALLOCATED
+        exist_segment.allocated_size += exist_block.size
+        self.device_snapshot.total_allocated += exist_block.size
