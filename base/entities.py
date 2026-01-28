@@ -248,6 +248,10 @@ class DeviceSnapshot:
     trace_entries: List[TraceEntry]
     block_map: Dict[int, Block] = {}
 
+    total_allocated: int # 二次分配总量
+    total_reserved: int # 内存池总量
+    total_activated: int # 活跃内存总量
+
     @classmethod
     def from_dict(cls, device_snapshot_dict: dict, device: int = 0):
         segments_dict = device_snapshot_dict["segments"]
@@ -256,11 +260,17 @@ class DeviceSnapshot:
         snapshot.segments = []
         snapshot.trace_entries = []
         snapshot.block_map = {}
+        snapshot.total_allocated = 0
+        snapshot.total_reserved = 0
+        snapshot.total_activated = 0
         # 读取dump_snapshot时内存状态
         for segment_dict in segments_dict:
             _segment = Segment.from_dict(segment_dict)
             snapshot.block_map |= _segment.seg_block_map
             snapshot.segments.append(_segment)
+            snapshot.total_allocated += _segment.allocated_size
+            snapshot.total_reserved += _segment.total_size
+            snapshot.total_activated += _segment.active_size
         snapshot.segments.sort(key=lambda segment: segment.address)
         # 读取事件序列
         for idx, trace_entry_dict in enumerate(device_trace_list):
