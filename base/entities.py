@@ -1,4 +1,5 @@
 from typing import Dict, List, Literal, Optional, Any
+from dataclasses import dataclass, field
 
 
 class Frame:
@@ -24,7 +25,7 @@ class Frame:
             "name": self.name
         }
 
-
+@dataclass
 class TraceEntry:
     # When `torch.npu.memory._record_memory_history()` is enabled,
     # the snapshot will contain TraceEntry objects that record each
@@ -49,24 +50,25 @@ class TraceEntry:
     """
     action: str = ""
     addr: int = -1  # not present for OOM
-    frames: List[Frame] = []
-    size: int = -1
-    stream: int = -1
+    frames: List[Frame] = field(default_factory=list)
+    size: int = 0
+    stream: int = 0
     device_free: int = -1  # only present for OOM, the amount of
     # memory npu still reports to be free
 
     _origin: dict = None  # Readonly
-    idx: int = -1 # 索引，全局唯一
+    idx: int = -1  # 索引，全局唯一
 
     @classmethod
     def from_dict(cls, trace_dict: dict):
-        trace_entry = cls()
-        trace_entry.action = trace_dict["action"]
-        trace_entry.addr = int(trace_dict["addr"])
-        trace_entry.size = int(trace_dict["size"])
-        trace_entry.stream = int(trace_dict["stream"])
-        trace_entry._origin = trace_dict
-        trace_entry.frames = [Frame.from_dict(_frame_dict) for _frame_dict in trace_dict.get("frames", [])]
+        trace_entry = cls(
+            action = trace_dict["action"],
+            addr = int(trace_dict["addr"]),
+            size = int(trace_dict["size"]),
+            stream = int(trace_dict["stream"]),
+            _origin = trace_dict,
+            frames = [Frame.from_dict(_frame_dict) for _frame_dict in trace_dict.get("frames", [])]
+        )
         return trace_entry
 
     def get_callstack(self):
@@ -90,32 +92,24 @@ class BlockState:
     INACTIVE = "inactive"
 
 
+@dataclass
 class Block:
     # A piece of memory returned from the allocator, or
     # current cached but inactive.
-    size: int = -1
-    requested_size: int = -1  # size requested during malloc, may be smaller than
+    size: int = 0
+    requested_size: int = 0  # size requested during malloc, may be smaller than
     # size due to rounding
     address: int = -1
-    state: Literal['active_allocated',  # used by a tensor
-    'active_pending_free',  # waiting for another stream to finish using
-        # this, then it will become free
-    'inactive',] = ""  # free for reuse
-    frames: List[Frame]  # stack trace from where the allocation occurred
+    state: Literal[
+        'active_allocated',  # used by a tensor
+        'active_pending_free',  # waiting for another stream to finish using this, then it will become free
+        'inactive'] = BlockState.INACTIVE  # free for reuse
+    frames: List[Frame] = field(default_factory=list)  # stack trace from where the allocation occurred
 
     # 指向持有该block的segment对象
     segment_ptr: Any = None
     free_event_idx = None
     alloc_event_idx = None
-
-    def __init__(self, size: int, requested_size: int, address: int, state=BlockState.INACTIVE, frames=None):
-        if frames is None:
-            frames = []
-        self.size = size
-        self.requested_size = requested_size
-        self.address = address
-        self.state = state
-        self.frames = frames
 
     @classmethod
     def from_dict(cls, block_dict: dict):
@@ -127,7 +121,7 @@ class Block:
             frames=[Frame.from_dict(frame) for frame in block_dict.get("frames", [])]
         )
         if block.state != BlockState.INACTIVE:
-            block.free_event_idx = -1 # 代表dump时刻仍然未释放的
+            block.free_event_idx = -1  # 代表dump时刻仍然未释放的
         return block
 
     @classmethod
@@ -153,6 +147,7 @@ class Block:
         )
 
 
+@dataclass
 class Segment:
     # Segments are memory returned from a aclrtMalloc call.
     # The size of reserved memory is the sum of all Segments.
@@ -161,58 +156,59 @@ class Segment:
     # is split into more then one Block.
     # empty_cache() frees Segments that are entirely inactive.
     address: int = -1
-    total_size: int = -1  # aclrtMalloc'd size of segment
-    stream: int = -1
+    total_size: int = 0  # aclrtMalloc'd size of segment
+    stream: int = 0
     segment_type: Literal['small', 'large'] = ""  # 'large' (>1MB)
-    allocated_size: int = -1  # size of memory in use
-    active_size: int = -1  # size of memory in use or in active_awaiting_free state
-    blocks: List[Block] = []
+    allocated_size: int = 0  # size of memory in use
+    active_size: int = 0  # size of memory in use or in active_awaiting_free state
+    blocks: List[Block] = field(default_factory=list)
     device: int = 0
-    frames: List[Frame] = []
+    frames: List[Frame] = field(default_factory=list)
 
     _origin: dict = None  # Readonly
     free_or_unmap_event_idx = None
     alloc_or_map_event_idx = None
-    seg_block_map: Dict[int, Block] = {}
+    seg_block_map: Dict[int, Block] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, segment_dict: dict):
-        segment = cls()
-        segment.seg_block_map = {}
-        segment.address = segment_dict["address"]
-        segment.total_size = segment_dict["total_size"]
-        segment.stream = segment_dict["stream"]
-        segment.segment_type = segment_dict["segment_type"]
-        segment.allocated_size = segment_dict["allocated_size"]
-        segment.active_size = segment_dict["active_size"]
-        segment.frames = [Frame.from_dict(_frame) for _frame in segment_dict.get("frames", [])]
-        segment.device = segment_dict.get("device", 0)
-        segment._origin = segment_dict
-        segment.blocks = []
+        segment = cls(
+            address=segment_dict["address"],
+            total_size=segment_dict["total_size"],
+            stream=segment_dict["stream"],
+            segment_type=segment_dict["segment_type"],
+            allocated_size=segment_dict["allocated_size"],
+            active_size=segment_dict["active_size"],
+            frames=[Frame.from_dict(_frame) for _frame in segment_dict.get("frames", [])],
+            device=segment_dict.get("device", 0),
+            _origin=segment_dict,
+        )
         for block in segment_dict["blocks"]:
             _block = Block.from_dict(block)
             _block.segment_ptr = segment
             segment.seg_block_map[_block.address] = _block
             segment.blocks.append(_block)
-        segment.free_or_unmap_event_idx = -1 # 代表dump时刻仍未释放的
+        segment.free_or_unmap_event_idx = -1  # 代表dump时刻仍未释放的
         return segment
 
     @classmethod
     def build_from_event(cls, event: TraceEntry):
-        segment = cls()
-        segment.seg_block_map = {}
-        segment.address = event.addr
-        segment.total_size = event.size
-        segment.stream = event.stream
-        segment.frames = event.frames
-        segment.device = event.device if hasattr(event, 'device') else 0
-        # 为回放时模拟创建的segment增加一个模拟block
-        segment.blocks = [Block(
-            size=segment.total_size,
-            requested_size=segment.total_size,
-            address=segment.address,
-            state=BlockState.INACTIVE
-        )]
+        segment = cls(
+            address=event.addr,
+            total_size=event.size,
+            stream=event.stream,
+            frames=event.frames,
+            device=event.device if hasattr(event, 'device') else 0,
+            allocated_size=0,
+            active_size=0,
+            # 从事件创建segment时，需要为segment填充一个inactive的block
+            blocks=[Block(
+                size=event.size,
+                requested_size=event.size,
+                address=event.addr,
+                state=BlockState.INACTIVE
+            )]
+        )
         segment.seg_block_map[segment.address] = segment.blocks[0]
         return segment
 
@@ -248,9 +244,9 @@ class DeviceSnapshot:
     trace_entries: List[TraceEntry]
     block_map: Dict[int, Block] = {}
 
-    total_allocated: int # 二次分配总量
-    total_reserved: int # 内存池总量
-    total_activated: int # 活跃内存总量
+    total_allocated: int  # 二次分配总量
+    total_reserved: int  # 内存池总量
+    total_activated: int  # 活跃内存总量
 
     @classmethod
     def from_dict(cls, device_snapshot_dict: dict, device: int = 0):
