@@ -1,11 +1,14 @@
 import unittest
+import copy
 import pandas as pd
 from pathlib import Path
 from base import TraceEntry, DeviceSnapshot, Segment, Block, BlockState
 from simulate import SimulateDeviceSnapshot, SimulateHooker
+from simulate.hooker_defs import AllocatorHooker
 from test.common import valid_segments
 
 current_dir = Path(__file__).parent.resolve()
+
 
 class TestReplayEventHooker(SimulateHooker):
     def __init__(self, test_util, valid_interval: int = 100):
@@ -21,6 +24,43 @@ class TestReplayEventHooker(SimulateHooker):
         if self.replay_count % self.valid_interval == 0:
             valid_segments(current_snapshot.segments, self.test_util)
         return True
+
+
+class TestReplayBlockHooker(AllocatorHooker):
+    def __init__(self, test_util: unittest.TestCase):
+        self.test_util = test_util
+        self._segment = None
+        self.pre_seg_allocated_size = 0
+        self.pre_seg_active_size = 0
+        self.pre_snapshot_total_allocated_size = 0
+        self.pre_snapshot_total_active_size = 0
+
+    def pre_replay_alloc_block(self, wait4alloc_block: Block, current_snapshot: DeviceSnapshot):
+        super().pre_replay_alloc_block(wait4alloc_block, current_snapshot)
+        self.test_util.assertNotEqual(wait4alloc_block.state, BlockState.INACTIVE)
+        _segment_idx = current_snapshot.find_segment_idx_by_addr(wait4alloc_block.address)
+        self.test_util.assertTrue(0 <= _segment_idx < len(current_snapshot.segments))
+        self._segment = current_snapshot.segments[_segment_idx]
+        self.pre_seg_allocated_size = self._segment.allocated_size
+        self.pre_seg_active_size = self._segment.active_size
+        self.pre_snapshot_total_allocated_size = current_snapshot.total_allocated
+        self.pre_snapshot_total_active_size = current_snapshot.total_activated
+
+    def post_replay_alloc_block(self, allocated_block: Block, current_snapshot: DeviceSnapshot):
+        super().post_replay_alloc_block(allocated_block, current_snapshot)
+        self.test_util.assertEqual(self.pre_seg_active_size + allocated_block.size, self._segment.active_size)
+        self.test_util.assertEqual(self.pre_snapshot_total_active_size + allocated_block.size,
+                                   current_snapshot.total_activated)
+        if allocated_block.state == BlockState.ACTIVE_ALLOCATED:
+            self.test_util.assertEqual(self.pre_seg_allocated_size + allocated_block.size, self._segment.allocated_size)
+            self.test_util.assertEqual(self.pre_snapshot_total_allocated_size + allocated_block.size,
+                                       current_snapshot.total_allocated)
+
+    def pre_replay_free_block(self, wait4free_block: Block, current_snapshot: DeviceSnapshot):
+        super().pre_replay_free_block(wait4free_block, current_snapshot)
+
+    def post_replay_free_block(self, released_block: Block, current_snapshot: DeviceSnapshot):
+        super().post_replay_free_block(released_block, current_snapshot)
 
 
 class TestSimulate(unittest.TestCase):
@@ -39,6 +79,11 @@ class TestSimulate(unittest.TestCase):
     def testRawSnapshotValidity(self):
         valid_segments(self.snapshot.device_snapshot.segments, self)
         valid_segments(self.vmem_snapshot.device_snapshot.segments, self)
+
+    def testBlockHooker(self):
+        snapshot = copy.deepcopy(self.snapshot)
+        snapshot.register_allocator_hooker(TestReplayBlockHooker(self))
+        snapshot.replay()
 
     def testReplaySnapshot(self):
         self.snapshot.register_hooker(TestReplayEventHooker(self))

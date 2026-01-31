@@ -162,7 +162,9 @@ MemSnapDump/
 │
 ├── simulate/           # 模拟与回放逻辑
 │   ├── __init__.py     
-│   └── simulate.py     # 主要类：SimulateDeviceSnapshot，负责事件回放与 hook 注册
+│   ├── hooker_defs.py                  # 各类回放过程中可派生的钩子类基类
+│   ├── simulated_caching_allocator.py  # 快照回放模拟内存分配器的核心定义与实现
+│   └── simulate.py                     # 主要类：SimulateDeviceSnapshot，负责事件回放与 hook 注册
 │
 ├── tools/                 # 工具模块：提供核心功能命令行工具
 │   └── slice_dump/        # 快照剪裁工具核心实现
