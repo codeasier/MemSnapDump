@@ -1,3 +1,4 @@
-from .simulate import SimulateHooker, SimulateDeviceSnapshot
+from .simulate import SimulateDeviceSnapshot
+from .hooker_defs import SimulateHooker, AllocatorHooker
 
-__all__ = ['SimulateHooker', 'SimulateDeviceSnapshot']
+__all__ = ['SimulateDeviceSnapshot', 'SimulateHooker', 'AllocatorHooker']
