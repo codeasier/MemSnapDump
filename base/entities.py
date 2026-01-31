@@ -25,6 +25,7 @@ class Frame:
             "name": self.name
         }
 
+
 @dataclass
 class TraceEntry:
     # When `torch.npu.memory._record_memory_history()` is enabled,
@@ -62,12 +63,12 @@ class TraceEntry:
     @classmethod
     def from_dict(cls, trace_dict: dict):
         trace_entry = cls(
-            action = trace_dict["action"],
-            addr = int(trace_dict["addr"]),
-            size = int(trace_dict["size"]),
-            stream = int(trace_dict["stream"]),
-            _origin = trace_dict,
-            frames = [Frame.from_dict(_frame_dict) for _frame_dict in trace_dict.get("frames", [])]
+            action=trace_dict["action"],
+            addr=int(trace_dict["addr"]),
+            size=int(trace_dict["size"]),
+            stream=int(trace_dict["stream"]),
+            _origin=trace_dict,
+            frames=[Frame.from_dict(_frame_dict) for _frame_dict in trace_dict.get("frames", [])]
         )
         return trace_entry
 
@@ -164,10 +165,9 @@ class Segment:
     blocks: List[Block] = field(default_factory=list)
     device: int = 0
     frames: List[Frame] = field(default_factory=list)
-
     _origin: dict = None  # Readonly
-    free_or_unmap_event_idx = None
-    alloc_or_map_event_idx = None
+    free_or_unmap_event_idx: int = -99
+    alloc_or_map_event_idx: int = -99
     seg_block_map: Dict[int, Block] = field(default_factory=dict)
 
     @classmethod
