@@ -109,8 +109,8 @@ class Block:
 
     # 指向持有该block的segment对象
     segment_ptr: Any = None
-    free_event_idx = None
-    alloc_event_idx = None
+    free_event_idx: int = None
+    alloc_event_idx: int = None
 
     @classmethod
     def from_dict(cls, block_dict: dict):
@@ -121,8 +121,6 @@ class Block:
             state=block_dict["state"],
             frames=[Frame.from_dict(frame) for frame in block_dict.get("frames", [])]
         )
-        if block.state != BlockState.INACTIVE:
-            block.free_event_idx = -1  # 代表dump时刻仍然未释放的
         return block
 
     @classmethod
@@ -166,8 +164,8 @@ class Segment:
     device: int = 0
     frames: List[Frame] = field(default_factory=list)
     _origin: dict = None  # Readonly
-    free_or_unmap_event_idx: int = -99
-    alloc_or_map_event_idx: int = -99
+    free_or_unmap_event_idx: int = None
+    alloc_or_map_event_idx: int = None
     seg_block_map: Dict[int, Block] = field(default_factory=dict)
 
     @classmethod
@@ -188,7 +186,6 @@ class Segment:
             _block.segment_ptr = segment
             segment.seg_block_map[_block.address] = _block
             segment.blocks.append(_block)
-        segment.free_or_unmap_event_idx = -1  # 代表dump时刻仍未释放的
         return segment
 
     @classmethod
