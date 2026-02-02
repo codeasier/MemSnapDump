@@ -66,22 +66,43 @@ class TestReplayBlockHooker(AllocatorHooker):
 class TestSimulate(unittest.TestCase):
 
     def setUp(self):
-        # 普通未开启虚拟内存snapshot
         snapshot_path = current_dir / 'test-data/snapshot_1768383987920985470.pkl'
-        vmem_snapshot_path = current_dir / 'test-data/snapshot_expandable.pkl'
         self.snapshot = SimulateDeviceSnapshot(pd.read_pickle(snapshot_path), 0)
+        valid_segments(self.snapshot.device_snapshot.segments, self)
         # 开启虚拟内存的snapshot
+        vmem_snapshot_path = current_dir / 'test-data/snapshot_expandable.pkl'
         self.vmem_snapshot = SimulateDeviceSnapshot(pd.read_pickle(vmem_snapshot_path), 0)
+        valid_segments(self.vmem_snapshot.device_snapshot.segments, self)
+        # 未开启虚拟内存，有emptycache的snapshot
+        snapshot_with_empty_cache_path = current_dir / 'test-data/snapshot_with_empty_cache.pkl'
+        self.snapshot_with_empty_cache = SimulateDeviceSnapshot(pd.read_pickle(snapshot_with_empty_cache_path), 0)
+        valid_segments(self.snapshot_with_empty_cache.device_snapshot.segments, self)
+        # 开启虚拟内存且有emptycache的snapshot
+        vmem_snapshot_with_empty_cache_path = current_dir / 'test-data/snapshot_with_empty_cache_expandable.pkl'
+        self.vmem_snapshot_with_empty_cache = (
+            SimulateDeviceSnapshot(pd.read_pickle(vmem_snapshot_with_empty_cache_path), 0))
+        valid_segments(self.vmem_snapshot_with_empty_cache.device_snapshot.segments, self)
 
     def tearDown(self):
         ...
 
-    def testRawSnapshotValidity(self):
-        valid_segments(self.snapshot.device_snapshot.segments, self)
-        valid_segments(self.vmem_snapshot.device_snapshot.segments, self)
-
-    def testBlockHooker(self):
+    def testBlockHookerInSnapshot(self):
         snapshot = copy.deepcopy(self.snapshot)
+        snapshot.register_allocator_hooker(TestReplayBlockHooker(self))
+        snapshot.replay()
+
+    def testBlockHookerInVmemSnapshot(self):
+        snapshot = copy.deepcopy(self.vmem_snapshot)
+        snapshot.register_allocator_hooker(TestReplayBlockHooker(self))
+        snapshot.replay()
+
+    def testBlockHookerInSnapshotWithEmptyCache(self):
+        snapshot = copy.deepcopy(self.snapshot_with_empty_cache)
+        snapshot.register_allocator_hooker(TestReplayBlockHooker(self))
+        snapshot.replay()
+
+    def testBlockHookerInVmemSnapshotWithEmptyCache(self):
+        snapshot = copy.deepcopy(self.vmem_snapshot_with_empty_cache)
         snapshot.register_allocator_hooker(TestReplayBlockHooker(self))
         snapshot.replay()
 
@@ -89,6 +110,14 @@ class TestSimulate(unittest.TestCase):
         self.snapshot.register_hooker(TestReplayEventHooker(self))
         self.snapshot.replay()
 
-    def testReplayVMemSnapshot(self):
+    def testReplayVmemSnapshot(self):
         self.vmem_snapshot.register_hooker(TestReplayEventHooker(self))
         self.vmem_snapshot.replay()
+
+    def testReplaySnapshotWithEmptyCache(self):
+        self.snapshot_with_empty_cache.register_hooker(TestReplayEventHooker(self))
+        self.snapshot_with_empty_cache.replay()
+
+    def testReplayVmemSnapshotWithEmptyCache(self):
+        self.vmem_snapshot_with_empty_cache.register_hooker(TestReplayEventHooker(self))
+        self.vmem_snapshot_with_empty_cache.replay()
