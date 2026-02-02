@@ -23,14 +23,6 @@ class SimulateHooker(ABC):
         """
         ...
 
-    def post_replay_unmap_or_free_segment(self, released_segment: Segment, current_snapshot: DeviceSnapshot):
-        """
-            在回放时，释放或unmap一个内存段**后**回调，对应一个内存段申请或map事件后
-        :param released_segment:【副本】已释放的内存段
-        :param current_snapshot: 释放或unmap内存段后的内存快照
-        """
-        ...
-
 
 class AllocatorHooker(ABC):
     def pre_replay_alloc_block(self, wait4alloc_block: Block, current_snapshot: DeviceSnapshot):
