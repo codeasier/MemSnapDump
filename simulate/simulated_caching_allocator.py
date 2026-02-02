@@ -85,12 +85,13 @@ class SimulatedCachingAllocator:
             return False
         # 设置block的分配事件, 仿真内存分配器在free_block时实质对应的是回放到了内存分配事件，所以此处是设置分配事件id而不是释放事件id
         exist_block.alloc_event_idx = alloc_event.idx
+        exist_block_copy = copy.copy(exist_block)
         for hooker in self.hookers.values():
             hooker.pre_replay_free_block(exist_block, self.ctx.device_snapshot)
         if not self._do_free_block(free_block_loc):
             return False
         for hooker in self.hookers.values():
-            hooker.post_replay_free_block(exist_block, self.ctx.device_snapshot)
+            hooker.post_replay_free_block(exist_block_copy, self.ctx.device_snapshot)
         return True
 
     def active_block(self, free_requested_event: TraceEntry) -> bool:
@@ -238,7 +239,7 @@ class SimulatedCachingAllocator:
         exist_segment = self.ctx.device_snapshot.segments[exist_seg_idx]
         exist_block_idx = bisect.bisect_left([_block.address for _block in exist_segment.blocks], block_addr)
         exist_block = exist_segment.blocks[exist_block_idx]
-        if exist_block.address != block_addr or exist_block.size != block_size:
+        if exist_block.address != block_addr or self._get_aligned_size(exist_block.requested_size) != block_size:
             allocator_logger.error(f"{_error}: cannot found block (addr={block_addr}, size={block_size}) "
                                    f"in segment {exist_segment.to_dict()}")
             return BlockLoc(exist_seg_idx, -1)
