@@ -2,7 +2,7 @@ import unittest
 import copy
 from pathlib import Path
 from base import TraceEntry, DeviceSnapshot, Segment, Block, BlockState
-from util.pickle_util import load_pickle_to_dict
+from util.file_util import load_pickle_to_dict
 from simulate import SimulateDeviceSnapshot, SimulateHooker
 from simulate.hooker_defs import AllocatorHooker
 from test.common import valid_segments

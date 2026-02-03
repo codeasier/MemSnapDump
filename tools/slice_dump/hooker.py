@@ -7,7 +7,7 @@ from pathlib import Path
 from simulate import SimulateHooker
 from base import DeviceSnapshot, TraceEntry
 from util import get_logger
-from util.pickle_util import save_dict_to_pickle
+from util.file_util import save_dict_to_pickle
 
 dump_logger = get_logger("DUMP")
 

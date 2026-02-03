@@ -1,7 +1,9 @@
-import time
-from typing import List
+import os
+import argparse
+from pathlib import Path
 from simulate import SimulateHooker, SimulateDeviceSnapshot, AllocatorHooker
 from base import DeviceSnapshot, TraceEntry, Block, Segment, BlockState
+from util.file_util import check_dir_valid
 from .snapshot_adaptor import MemScopeEntityBuilder as Builder
 from .memscope.database import MemScopeDb
 from .memscope.entities import MemoryBlock
@@ -127,9 +129,37 @@ def dump(pickle_file: str, dump_file: str):
     snapshot.replay()
 
 
+def get_args():
+    parser = argparse.ArgumentParser(
+        description="This script is used to parse and convert snapshot data into a database "
+                    "format that is more convenient for visualization.")
+    arg_snapshot = parser.add_argument("snapshot_file", type=str, help="Memory snapshot file path.")
+    arg_dump_dir = parser.add_argument("--dump_dir", "-o",
+                                       required=False,
+                                       type=str,
+                                       default='',
+                                       help="Specify the directory to store the parsed database file. If not provided, "
+                                            "the same directory as the specified snapshot file will be used by default.")
+    args = parser.parse_args()
+    snapshot_path = Path(args.snapshot_file)
+    # 校验snapshot path
+    if not snapshot_path.is_file() or not os.access(args.snapshot_file, os.R_OK):
+        raise argparse.ArgumentError(arg_snapshot,
+                                     "The specified snapshot file does not exist, or is not a file, or is not readable.")
+    # 校验dump目标路径
+    if not args.dump_dir:
+        args.dump_dir = snapshot_path.parent
+    if not Path(args.dump_dir).is_dir() or not check_dir_valid(args.dump_dir):
+        raise argparse.ArgumentError(arg_dump_dir,
+                                     "The specified directory does not exist, or is not a directory, "
+                                     "or is not writable")
+    return args
+
+
 @timer
 def main():
-    dump('../../test-data/snapshot_expandable.pkl', '../../test-data/leaks_dump_2222.db')
+    args = get_args()
+    dump(args.snapshot_file, Path(args.dump_dir) / f"{Path(args.snapshot_file).stem}.db")
 
 
 if __name__ == '__main__':

@@ -5,7 +5,7 @@ import json
 import sqlite3
 from typing import List
 from pathlib import Path
-from util.pickle_util import load_pickle_to_dict
+from util.file_util import load_pickle_to_dict
 from base import TraceEntry, DeviceSnapshot, Segment, Block, BlockState
 from tools.adaptors import snapshot2memscope
 from simulate import SimulateDeviceSnapshot, SimulateHooker

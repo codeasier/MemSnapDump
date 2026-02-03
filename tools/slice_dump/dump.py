@@ -1,8 +1,9 @@
 import argparse
 import os.path
+from pathlib import Path
 
 from util import get_logger
-from util.pickle_util import load_pickle_to_dict
+from util.file_util import load_pickle_to_dict, check_file_valid, check_dir_valid
 from simulate import SimulateDeviceSnapshot
 from .hooker import SliceDumpHooker
 
@@ -12,7 +13,7 @@ dump_logger = get_logger("DUMP")
 def get_args():
     parser = argparse.ArgumentParser(description="This script is used for memory snapshot output files(typically in "
                                                  "pickle format captured by torch/torch_npu.")
-    parser.add_argument("snapshot_file", type=str, help="Memory snapshot file path.")
+    arg_snapshot = parser.add_argument("snapshot_file", type=str, help="Memory snapshot file path.")
     parser.add_argument("--device", "-d",
                         required=False,
                         default=0,
@@ -28,11 +29,11 @@ def get_args():
                         type=int,
                         default=15000,
                         help="Specify the maximum number of events to be dumped in single file, default is 15000.")
-    parser.add_argument("--dump_dir", "-o",
-                        required=False,
-                        type=str,
-                        default='',
-                        help="Specify the directory to dump snapshot files, default is the snapshot file directory.")
+    arg_dump_dir = parser.add_argument("--dump_dir", "-o",
+                                       required=False,
+                                       type=str,
+                                       default='',
+                                       help="Specify the directory to dump snapshot files, default is the snapshot file directory.")
     parser.add_argument("--dump_type", "-t",
                         required=False,
                         type=str,
@@ -41,28 +42,23 @@ def get_args():
                         help="Specify output dump file format; must be either 'pkl' or 'json' (default: pkl).")
     args = parser.parse_args()
     # 校验snapshot path
-    if (not args.snapshot_file or
-            not os.path.exists(args.snapshot_file) or
-            not os.path.isfile(args.snapshot_file) or
-            not os.access(args.snapshot_file, os.R_OK)):
-        raise argparse.ArgumentError("snapshot_file",
+    if not (args.snapshot_file and check_file_valid(args.snapshot_file)):
+        raise argparse.ArgumentError(arg_snapshot,
                                      "The specified snapshot file does not exist, or is not a file, or is not readable.")
     # 校验dump目标路径
     if not args.dump_dir:
         args.dump_dir = os.path.dirname(args.snapshot_file)
-    if (not os.path.exists(args.dump_dir) or
-            not os.path.isdir(args.dump_dir) or
-            not os.access(args.dump_dir, os.W_OK)):
-        raise argparse.ArgumentError("dump_dir",
-                                     "The dump directory does not exist, or is not a directory, "
-                                     "or is not writable")
+    if not check_dir_valid(args.dump_dir):
+        raise argparse.ArgumentError(arg_dump_dir,
+                                     "The dump directory does not exist, or is not a directory, or is not writable")
+
     return args
 
 
 def slice_dump():
     args = get_args()
     dump_logger.info(f"Start to dump snapshot slice, reading pickle file '{args.snapshot_file}'.")
-    df = load_pickle_to_dict(args.snapshot_file)
+    df = load_pickle_to_dict(Path(args.snapshot_file))
     if 'segments' not in df or 'device_traces' not in df or not df['device_traces']:
         dump_logger.warning("Snapshot files with no event records cannot be replayed or split. You may have disabled "
                             "history event recoding during collection.")

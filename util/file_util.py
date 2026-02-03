@@ -1,3 +1,4 @@
+import os
 import pickle
 from pathlib import Path
 from typing import Dict, Any
@@ -55,3 +56,43 @@ def save_dict_to_pickle(data: Dict[Any, Any], path: Path, protocol: int = 4) -> 
             pickle.dump(data, f, protocol=protocol)
     except OSError as e:
         raise OSError(f"无法写入文件 {path}: {e}") from e
+
+
+def check_dir_valid(path: str | Path, need_readable: bool = True, need_writable: bool = True) -> bool:
+    """
+        校验目录是否合法, 默认要求可读可写
+    :param path: 路径字符串或pathlib.Path对象
+    :param need_readable: 是否要求可读
+    :param need_writable: 是否要求可写
+    :return: 是否合法
+    """
+    _path = path
+    if not isinstance(path, Path):
+        _path = Path(_path)
+    if not _path.is_dir():
+        return False
+    if need_readable and not os.access(_path, os.R_OK):
+        return False
+    if need_writable and not os.access(_path, os.W_OK):
+        return False
+    return True
+
+
+def check_file_valid(path: str | Path, need_readable: bool = True, need_writable: bool = False) -> bool:
+    """
+        校验文件是否合法, 默认要求可读取，不要求可写
+    :param path: 路径字符串或pathlib.Path对象
+    :param need_readable: 是否要求可读
+    :param need_writable: 是否要求可写
+    :return:
+    """
+    _path = path
+    if not isinstance(path, Path):
+        _path = Path(_path)
+    if not _path.is_file():
+        return False
+    if need_readable and not os.access(_path, os.R_OK):
+        return False
+    if need_writable and not os.access(_path, os.W_OK):
+        return False
+    return True

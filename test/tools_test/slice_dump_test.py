@@ -2,7 +2,7 @@ import os
 import shutil
 import unittest
 from pathlib import Path
-from util.pickle_util import load_pickle_to_dict
+from util.file_util import load_pickle_to_dict
 from simulate import SimulateDeviceSnapshot
 from tools.slice_dump.hooker import SliceDumpHooker
 from test.simulate_test import TestReplayEventHooker
