@@ -67,7 +67,7 @@ class MemScopeDbHandler:
 
 
 class DumpEventAndAllocationHooker(SimulateHooker, AllocatorHooker):
-    def __init__(self, dump_dir: str):
+    def __init__(self, dump_dir: str, dump_cache_size: int = 1000):
         self.db_handler = MemScopeDbHandler(dump_dir)
         self.current_total_size = {}
 
@@ -116,9 +116,11 @@ class DumpEventAndAllocationHooker(SimulateHooker, AllocatorHooker):
 
 
 def dump(pickle_file: str, dump_file: str):
-    import pandas as pd
-    df = pd.read_pickle(pickle_file)
-    snapshot = SimulateDeviceSnapshot(df, 0)
+    import pickle
+    with open(pickle_file, 'rb') as f:
+        data = pickle.load(f)
+    # df = pd.read_pickle(pickle_file)
+    snapshot = SimulateDeviceSnapshot(data, 0)
     hooker = DumpEventAndAllocationHooker(dump_file)
     snapshot.register_hooker(hooker)
     snapshot.register_allocator_hooker(hooker)

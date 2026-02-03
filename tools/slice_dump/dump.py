@@ -1,9 +1,8 @@
 import argparse
 import os.path
 
-import pandas as pd
-
 from util import get_logger
+from util.pickle_util import load_pickle_to_dict
 from simulate import SimulateDeviceSnapshot
 from .hooker import SliceDumpHooker
 
@@ -63,7 +62,7 @@ def get_args():
 def slice_dump():
     args = get_args()
     dump_logger.info(f"Start to dump snapshot slice, reading pickle file '{args.snapshot_file}'.")
-    df = pd.read_pickle(args.snapshot_file)
+    df = load_pickle_to_dict(args.snapshot_file)
     if 'segments' not in df or 'device_traces' not in df or not df['device_traces']:
         dump_logger.warning("Snapshot files with no event records cannot be replayed or split. You may have disabled "
                             "history event recoding during collection.")

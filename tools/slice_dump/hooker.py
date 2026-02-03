@@ -2,13 +2,15 @@ import os
 import copy
 import math
 import json
-import pandas as pd
 from typing import Literal
+from pathlib import Path
 from simulate import SimulateHooker
 from base import DeviceSnapshot, TraceEntry
 from util import get_logger
+from util.pickle_util import save_dict_to_pickle
 
 dump_logger = get_logger("DUMP")
+
 
 class SliceDumpHooker(SimulateHooker):
     """
@@ -103,16 +105,16 @@ class SliceDumpHooker(SimulateHooker):
         self.events_buffer.clear()
         dump_logger.info(f"Start to dump snapshot slice: {slice_snapshot_name}")
         if self.dump_type == "pkl":
-            pd.to_pickle(slice_snapshot_dict, slice_snapshot_name, protocol=4)
+            save_dict_to_pickle(slice_snapshot_dict, slice_snapshot_name, protocol=4)
         else:
             with open(slice_snapshot_name, 'w') as f:
                 json.dump(slice_snapshot_dict, f)
         self.dump_count += 1
         dump_logger.info(f"Successfully saved slice to file: {slice_snapshot_name}")
 
-    def _get_dump_filename(self) -> str:
+    def _get_dump_filename(self) -> Path:
         slice_num = self.num_of_slices - self.dump_count
         entry_idx_start = max(self.num_of_events - (self.dump_count + 1) * self.max_entries + 1, 0)
         entry_idx_end = self.num_of_events - self.dump_count * self.max_entries
-        return os.path.join(self.dump_dir,
-                            f"slice_{slice_num}_entry_{entry_idx_start}_{entry_idx_end}.{self.dump_type}")
+        return Path(os.path.join(self.dump_dir,
+                                 f"slice_{slice_num}_entry_{entry_idx_start}_{entry_idx_end}.{self.dump_type}"))
