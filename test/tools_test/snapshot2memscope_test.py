@@ -4,10 +4,8 @@ import unittest
 import json
 import sqlite3
 from typing import List
-
-import pandas as pd
 from pathlib import Path
-
+from util.pickle_util import load_pickle_to_dict
 from base import TraceEntry, DeviceSnapshot, Segment, Block, BlockState
 from tools.adaptors import snapshot2memscope
 from simulate import SimulateDeviceSnapshot, SimulateHooker
@@ -41,7 +39,7 @@ class TestMemscopeDbHandler:
         return block
 
     @staticmethod
-    def build_segments_by_rows(rows, is_expandable = False):
+    def build_segments_by_rows(rows, is_expandable=False):
         current_seg: Segment = None
         results: List[Segment] = list()
         for row in rows:
@@ -64,7 +62,7 @@ class TestMemscopeDbHandler:
                 current_seg = seg
         return results
 
-    def query_segments_by_event_id(self, event_id: int, is_expandable = False):
+    def query_segments_by_event_id(self, event_id: int, is_expandable=False):
         cursor = self.conn.cursor()
         query_sql = """
                     select *
@@ -74,14 +72,14 @@ class TestMemscopeDbHandler:
                     order by addr"""
         cursor.execute(query_sql, (event_id * 10, event_id * 10))
         rows = cursor.fetchall()
-        return TestMemscopeDbHandler.build_segments_by_rows(rows, is_expandable = is_expandable)
+        return TestMemscopeDbHandler.build_segments_by_rows(rows, is_expandable=is_expandable)
 
     def __del__(self):
         self.conn.close()
 
 
 class TestMemscopeDbHooker(SimulateHooker):
-    def __init__(self, dump_db_path: str, test_util: unittest.TestCase, is_expandable = False):
+    def __init__(self, dump_db_path: str, test_util: unittest.TestCase, is_expandable=False):
         self.db_handler = TestMemscopeDbHandler(dump_db_path)
         self.event_count = 0
         self.test_util = test_util
@@ -111,34 +109,36 @@ class TestMemscopeDbHooker(SimulateHooker):
     def post_undo_event(self, already_undo_event: TraceEntry, current_snapshot: DeviceSnapshot) -> bool:
         return True
 
+
 current_dir = Path(__file__).parent.resolve()
+
 
 class Snapshot2MemscopeDbTest(unittest.TestCase):
     def setUp(self):
         self.test_data_path = (current_dir / '../test-data/').resolve()
         self.snapshot_path = self.test_data_path / 'snapshot_with_empty_cache.pkl'
         self.vmem_snapshot_path = self.test_data_path / 'snapshot_with_empty_cache_expandable.pkl'
-        self.snapshot = SimulateDeviceSnapshot(pd.read_pickle(self.snapshot_path))
-        self.vmem_snapshot = SimulateDeviceSnapshot(pd.read_pickle(self.vmem_snapshot_path))
         self.cache_dir = self.test_data_path / 'tmp'
         if os.path.exists(self.cache_dir):
             shutil.rmtree(self.cache_dir)
         os.mkdir(self.cache_dir)
         self.snapshot_dump_db = 'leaks_dump_1.db'
         self.vmem_snapshot_dump_db = 'leaks_dump_2.db'
-        snapshot2memscope.dump(self.snapshot_path, self.cache_dir / self.snapshot_dump_db)
-        snapshot2memscope.dump(self.vmem_snapshot_path, self.cache_dir / self.vmem_snapshot_dump_db)
-        self.assertTrue(os.path.exists(self.cache_dir / self.vmem_snapshot_dump_db))
-        self.assertTrue(os.path.exists(self.cache_dir / self.snapshot_dump_db))
 
     def tearDown(self):
         shutil.rmtree(self.cache_dir)
 
     def testSnapshot2MemscopeDb(self):
-        self.snapshot.register_hooker(TestMemscopeDbHooker(self.cache_dir / self.snapshot_dump_db, self))
-        self.snapshot.replay()
+        snapshot2memscope.dump(self.snapshot_path, self.cache_dir / self.snapshot_dump_db)
+        self.assertTrue(os.path.exists(self.cache_dir / self.snapshot_dump_db))
+        snapshot = SimulateDeviceSnapshot(load_pickle_to_dict(self.snapshot_path))
+        snapshot.register_hooker(TestMemscopeDbHooker(self.cache_dir / self.snapshot_dump_db, self))
+        snapshot.replay()
 
     def testVemSnapshot2MemscopeDb(self):
-        self.vmem_snapshot.register_hooker(TestMemscopeDbHooker(self.cache_dir / self.vmem_snapshot_dump_db, self,
-                                                                is_expandable=True))
-        self.vmem_snapshot.replay()
+        snapshot2memscope.dump(self.vmem_snapshot_path, self.cache_dir / self.vmem_snapshot_dump_db)
+        self.assertTrue(os.path.exists(self.cache_dir / self.vmem_snapshot_dump_db))
+        vmem_snapshot = SimulateDeviceSnapshot(load_pickle_to_dict(self.vmem_snapshot_path))
+        vmem_snapshot.register_hooker(TestMemscopeDbHooker(self.cache_dir / self.vmem_snapshot_dump_db, self,
+                                                           is_expandable=True))
+        vmem_snapshot.replay()
