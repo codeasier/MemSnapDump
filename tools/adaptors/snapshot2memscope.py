@@ -77,13 +77,21 @@ class DumpEventAndAllocationHooker(SimulateHooker, AllocatorHooker):
         # 每个事件回放后dump一次allocation
         self.db_handler.insert_allocation(
             Builder.build_memory_allocation(0, already_undo_event, current_snapshot).to_dict())
-        # 回放完毕，dump剩余Segmen及block数据, 注意应该先插入blocks再插入seg
+        # 回放完毕，dump剩余Segmen及block数据, 注意应该先插入blocks
         if not current_snapshot.trace_entries:
             for seg in current_snapshot.segments:
                 for block in seg.blocks:
                     if block.state != BlockState.INACTIVE:
                         self.db_handler.insert_block(Builder.build_memory_block_from_snapshot_block(0, block).to_dict())
-                self.db_handler.insert_block(Builder.build_memory_block_from_snapshot_segment(0, seg).to_dict())
+                # segment不插入block表，而是以模拟事件插入事件表，便于后续重建segment
+                self.db_handler.insert_event(Builder.build_memory_event_from_snapshot_trace_entry(0, TraceEntry(
+                    idx=None,
+                    action='segment_map' if seg.is_expandable else 'segment_alloc',
+                    addr=seg.address,
+                    frames=seg.frames,
+                    size=seg.total_size,
+                    stream=seg.stream,
+                )).to_dict())
         return True
 
     def pre_undo_event(self, wait4undo_event: TraceEntry, current_snapshot: DeviceSnapshot) -> bool:
@@ -102,12 +110,6 @@ class DumpEventAndAllocationHooker(SimulateHooker, AllocatorHooker):
         block = Builder.build_memory_block_from_snapshot_block(0, wait4free_block)
         self._append_size_attr_to_mem_block(block)
         self.db_handler.insert_block(block.to_dict())
-
-    def post_replay_unmap_or_free_segment(self, released_segment: Segment, current_snapshot: DeviceSnapshot):
-        super().post_replay_unmap_or_free_segment(released_segment, current_snapshot)
-        seg = Builder.build_memory_block_from_snapshot_segment(0, released_segment)
-        self._append_size_attr_to_mem_block(seg)
-        self.db_handler.insert_block(seg.to_dict())
 
     def _append_size_attr_to_mem_block(self, ms_block: MemoryBlock):
         if isinstance(ms_block, MemoryBlock):
