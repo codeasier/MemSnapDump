@@ -18,6 +18,7 @@ def valid_segment(segment: Segment, test_util: unittest.TestCase):
             if block.state == BlockState.ACTIVE_ALLOCATED:
                 allocated += block.size
         test_util.assertEqual(block.address, addr_offset)
+        test_util.assertEqual(block.segment_ptr, segment)
         addr_offset += block.size
     test_util.assertEqual(segment.address + segment.total_size, addr_offset)
     test_util.assertEqual(allocated, segment.allocated_size)

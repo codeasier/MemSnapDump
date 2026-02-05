@@ -21,7 +21,7 @@ class SliceDumpTest(unittest.TestCase):
         shutil.rmtree(self.tmp_out_dir)
 
     def testSplitSnapshotWithDefaultArgs(self):
-        snapshot_path = current_dir / '../test-data/' / 'snapshot_1768383987920985470.pkl'
+        snapshot_path = current_dir / '../test-data/' / 'snapshot_with_empty_cache.pkl'
         snapshot = SimulateDeviceSnapshot(load_pickle_to_dict(snapshot_path), 0)
         total_entries = len(snapshot.device_snapshot.trace_entries)
         expect_slices = max(total_entries // 15000, 4)
@@ -29,16 +29,16 @@ class SliceDumpTest(unittest.TestCase):
             dump_dir=self.tmp_out_dir
         )
         snapshot.register_hooker(hooker)
-        snapshot.replay()
+        self.assertTrue(snapshot.replay())
         pkl_files = [f for f in self.tmp_out_dir.iterdir() if f.is_file() and f.suffix == '.pkl']
         self.assertEqual(len(pkl_files), expect_slices)
         for pkl_file in pkl_files:
             snapshot_slice = SimulateDeviceSnapshot(load_pickle_to_dict(pkl_file), 0)
             snapshot_slice.register_hooker(TestReplayEventHooker(self))
-            snapshot_slice.replay()
+            self.assertTrue(snapshot_slice.replay())
 
     def testSplitExpandableSnapshot(self):
-        snapshot_path = current_dir / '../test-data/' / 'snapshot_expandable.pkl'
+        snapshot_path = current_dir / '../test-data/' / 'snapshot_with_empty_cache_expandable.pkl'
         snapshot = SimulateDeviceSnapshot(load_pickle_to_dict(snapshot_path), 0)
         total_entries = len(snapshot.device_snapshot.trace_entries)
         expect_slices = max(total_entries // 15000, 4)
@@ -46,10 +46,10 @@ class SliceDumpTest(unittest.TestCase):
             dump_dir=self.tmp_out_dir
         )
         snapshot.register_hooker(hooker)
-        snapshot.replay()
+        self.assertTrue(snapshot.replay())
         pkl_files = [f for f in self.tmp_out_dir.iterdir() if f.is_file() and f.suffix == '.pkl']
         self.assertEqual(len(pkl_files), expect_slices)
         for pkl_file in pkl_files:
             snapshot_slice = SimulateDeviceSnapshot(load_pickle_to_dict(pkl_file), 0)
             snapshot_slice.register_hooker(TestReplayEventHooker(self))
-            snapshot_slice.replay()
+            self.assertTrue(snapshot_slice.replay())
