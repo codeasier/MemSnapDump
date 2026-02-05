@@ -65,9 +65,7 @@ class SimulatedCachingAllocator:
             return False
         for hooker in self.hookers.values():
             # new_block对象可能并不会被插入到内存池中（如已有完整内存块对象可复用，或拆解后使用原block缩小规模的形式）
-            # 从block_map中获取最为稳妥
-            hooker.post_replay_alloc_block(self.ctx.device_snapshot.block_map[new_block.address],
-                                           self.ctx.device_snapshot)
+            hooker.post_replay_alloc_block(new_block, self.ctx.device_snapshot)
         return True
 
     def free_block(self, alloc_event: TraceEntry) -> bool:
@@ -126,7 +124,6 @@ class SimulatedCachingAllocator:
         for hooker in self.hookers.values():
             hooker.pre_replay_map_or_alloc_segment(new_segment, self.ctx.device_snapshot)
         segments.insert(idx, new_segment)
-        self.ctx.device_snapshot.block_map |= new_segment.seg_block_map
         self.ctx.device_snapshot.total_reserved += new_segment.total_size
         # 设置seg的释放事件, 仿真内存分配器在alloc/map segment时实质对应的是回放到了free/unmap事件，所以此处是设置释放事件id而不是分配事件id
         if self.ctx.current_undo_event:
@@ -134,7 +131,7 @@ class SimulatedCachingAllocator:
         if not merge:
             for hooker in self.hookers.values():
                 hooker.post_replay_map_or_alloc_segment(new_segment, self.ctx.device_snapshot)
-            return False
+            return True
         virtual_map_segment = copy.deepcopy(new_segment)
         # 尝试从前一个segment尽可能多的向后合并
         start_merge_idx = idx - 1 if idx > 0 else idx
@@ -261,8 +258,6 @@ class SimulatedCachingAllocator:
 
     def _insert_block_into_segment(self, segment: Segment, new_block: Block, insert_idx: int):
         segment.blocks.insert(insert_idx, new_block)
-        segment.seg_block_map[new_block.address] = new_block
-        self.ctx.device_snapshot.block_map[new_block.address] = new_block
         if new_block.state != BlockState.INACTIVE:
             segment.active_size += new_block.size
             self.ctx.device_snapshot.total_activated += new_block.size
@@ -347,6 +342,7 @@ class SimulatedCachingAllocator:
                 blocks=list(),
                 device=origin_segment.device,
                 frames=origin_segment.frames,
+                is_expandable=True,
                 free_or_unmap_event_idx=origin_segment.free_or_unmap_event_idx,
                 alloc_or_map_event_idx=origin_segment.alloc_or_map_event_idx
             )
@@ -355,6 +351,21 @@ class SimulatedCachingAllocator:
             self.ctx.device_snapshot.segments.insert(current_idx, new_seg)
             offset_addr += new_seg_size
         return True
+
+    @staticmethod
+    def merge_segments(target: Segment, source: Segment):
+        target.total_size += source.total_size
+        target.allocated_size += source.allocated_size
+        target.active_size += source.active_size
+        target_tail_block = target.blocks[-1]
+        source_head_block = source.blocks[0]
+        # 如果source的第一个block与target最后一个block同为inactive，则需要进行合并
+        if target_tail_block.state == BlockState.INACTIVE and source_head_block.state == BlockState.INACTIVE:
+            target_tail_block.size += source_head_block.size
+            del source.blocks[0]
+        for block in source.blocks:
+            block.segment_ptr = target
+            target.blocks.append(block)
 
     def _drop_exist_segment(self, exist_seg_idx: int) -> bool:
         """
@@ -377,11 +388,7 @@ class SimulatedCachingAllocator:
             next_seg = segments[start_merge_idx + 1]
             # 如相同流且 当前seg的尾与next_seg头相接
             if cur_seg.stream == next_seg.stream and cur_seg.address + cur_seg.total_size == next_seg.address:
-                cur_seg.total_size += next_seg.total_size
-                cur_seg.allocated_size += next_seg.allocated_size
-                cur_seg.active_size += next_seg.active_size
-                cur_seg.blocks += next_seg.blocks
-                cur_seg.seg_block_map |= next_seg.seg_block_map
+                SimulatedCachingAllocator.merge_segments(cur_seg, next_seg)
                 del segments[start_merge_idx + 1]
             else:
                 start_merge_idx += 1
@@ -453,7 +460,6 @@ class SimulatedCachingAllocator:
                 frames=segment.frames,
                 segment_ptr=segment
             ))
-            segment.seg_block_map[segment.address] = segment.blocks[0]
         last_block_end = segment.blocks[-1].address + segment.blocks[-1].size
         padding_size = segment_end - last_block_end
         if padding_size > 0:
@@ -466,7 +472,6 @@ class SimulatedCachingAllocator:
                 segment_ptr=segment
             )
             segment.blocks.append(tail_block)
-            segment.seg_block_map[tail_block.address] = tail_block
 
     def _do_alloc_block(self, block: Block, alloc_block_loc: BlockLoc) -> bool:
         """
@@ -529,8 +534,6 @@ class SimulatedCachingAllocator:
         # 后向查找inactive 进行合并
         while start + 1 <= len(_seg_blocks) - 1 and _seg_blocks[start + 1].state == BlockState.INACTIVE:
             exist_segment.blocks[start].size += exist_segment.blocks[start + 1].size
-            del self.ctx.device_snapshot.block_map[exist_segment.blocks[start + 1].address]
-            del exist_segment.seg_block_map[exist_segment.blocks[start + 1].address]
             del exist_segment.blocks[start + 1]
         return True
 
@@ -553,7 +556,7 @@ class SimulatedCachingAllocator:
         # 无对齐：拆成三块，执行完成后，第二个块的大小应与待分配块大小相同
         slices = [unmap_seg_start - origin_seg_start, virtual_unmap_segment.total_size]
         if origin_seg_end != unmap_seg_end:
-            slices.append(unmap_seg_end - origin_seg_end)
+            slices.append(origin_seg_end - unmap_seg_end)
         if not self._split_exist_segment(origin_seg_idx, slices):
             return False
         return self._drop_exist_segment(origin_seg_idx + 1)
