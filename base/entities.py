@@ -163,10 +163,10 @@ class Segment:
     blocks: List[Block] = field(default_factory=list)
     device: int = 0
     frames: List[Frame] = field(default_factory=list)
+    is_expandable: bool = False
     _origin: dict = None  # Readonly
     free_or_unmap_event_idx: int = None
     alloc_or_map_event_idx: int = None
-    seg_block_map: Dict[int, Block] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, segment_dict: dict):
@@ -180,11 +180,11 @@ class Segment:
             frames=[Frame.from_dict(_frame) for _frame in segment_dict.get("frames", [])],
             device=segment_dict.get("device", 0),
             _origin=segment_dict,
+            is_expandable=segment_dict.get("is_expandable", False)
         )
         for block in segment_dict["blocks"]:
             _block = Block.from_dict(block)
             _block.segment_ptr = segment
-            segment.seg_block_map[_block.address] = _block
             segment.blocks.append(_block)
         return segment
 
@@ -198,15 +198,16 @@ class Segment:
             device=event.device if hasattr(event, 'device') else 0,
             allocated_size=0,
             active_size=0,
-            # 从事件创建segment时，需要为segment填充一个inactive的block
-            blocks=[Block(
-                size=event.size,
-                requested_size=event.size,
-                address=event.addr,
-                state=BlockState.INACTIVE
-            )]
+            is_expandable=event.action in ['segment_map', 'segment_unmap']
         )
-        segment.seg_block_map[segment.address] = segment.blocks[0]
+        # 从事件创建segment时，需要为segment填充一个inactive的block
+        segment.blocks = [Block(
+            size=event.size,
+            requested_size=event.size,
+            address=event.addr,
+            state=BlockState.INACTIVE,
+            segment_ptr=segment
+        )]
         return segment
 
     def to_dict(self):
@@ -218,6 +219,7 @@ class Segment:
             allocated_size=self.allocated_size,
             active_size=self.active_size,
             device=self.device,
+            is_expandable=self.is_expandable,
             frames=[frame.to_dict() for frame in self.frames],
             blocks=[block.to_dict() for block in self.blocks]
         )
@@ -239,7 +241,6 @@ class Segment:
 class DeviceSnapshot:
     segments: List[Segment]
     trace_entries: List[TraceEntry]
-    block_map: Dict[int, Block] = {}
 
     total_allocated: int  # 二次分配总量
     total_reserved: int  # 内存池总量
@@ -252,14 +253,12 @@ class DeviceSnapshot:
         snapshot = cls()
         snapshot.segments = []
         snapshot.trace_entries = []
-        snapshot.block_map = {}
         snapshot.total_allocated = 0
         snapshot.total_reserved = 0
         snapshot.total_activated = 0
         # 读取dump_snapshot时内存状态
         for segment_dict in segments_dict:
             _segment = Segment.from_dict(segment_dict)
-            snapshot.block_map |= _segment.seg_block_map
             snapshot.segments.append(_segment)
             snapshot.total_allocated += _segment.allocated_size
             snapshot.total_reserved += _segment.total_size
