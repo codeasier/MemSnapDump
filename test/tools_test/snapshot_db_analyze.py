@@ -1,8 +1,8 @@
 import bisect
 import sqlite3
-import json
 from typing import List
 from base import *
+from tools.adaptors.database import TRACE_ENTRY_ACTION_VALUE_MAP, BLOCK_STATE_VALUE_MAP
 
 
 class BlockRowDefs:
@@ -32,12 +32,26 @@ class TestSnapshotDbHandler:
         self.conn = sqlite3.connect(db_path)
 
     @staticmethod
+    def _block_state_by_value_map(state_code: int):
+        for k, v in BLOCK_STATE_VALUE_MAP.items():
+            if v == state_code:
+                return k
+        return state_code
+
+    @staticmethod
+    def _event_action_by_value_map(action_code: int):
+        for k, v in TRACE_ENTRY_ACTION_VALUE_MAP.items():
+            if v == action_code:
+                return k
+        return action_code
+
+    @staticmethod
     def build_block_by_row(row) -> Block:
         return Block(
             address=row[BlockRowDefs.ADDR],
             size=row[BlockRowDefs.SIZE],
             requested_size=row[BlockRowDefs.REQUESTED_SIZE],
-            state=row[BlockRowDefs.STATE],
+            state=TestSnapshotDbHandler._block_state_by_value_map(row[BlockRowDefs.STATE]),
             alloc_event_idx=row[BlockRowDefs.ALLOC_EVENT_ID],
             free_event_idx=row[BlockRowDefs.FREE_EVENT_ID]
         )
@@ -46,7 +60,7 @@ class TestSnapshotDbHandler:
     def build_trace_entry_by_row(row) -> TraceEntry:
         return TraceEntry(
             idx=row[EventRowDefs.ID],
-            action=row[EventRowDefs.ACTION],
+            action=TestSnapshotDbHandler._event_action_by_value_map(row[EventRowDefs.ACTION]),
             addr=row[EventRowDefs.ADDR],
             size=row[EventRowDefs.SIZE],
             stream=row[EventRowDefs.STREAM]
@@ -130,7 +144,7 @@ class TestSnapshotDbHandler:
                            select *
                            from trace_entry
                            where id <= ?
-                             and (action like 'segment%') \
+                             and (action between 0 and 3) \
                            """
         cursor = self.conn.cursor()
         cursor.execute(query_events_sql, (event_id,))

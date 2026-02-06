@@ -83,7 +83,8 @@ class SqliteColumn:
             autoincrement: bool = False,  # 是否自增
             not_null: bool = False,  # 是否不可为空
             unique: bool = False,  # 是否唯一
-            default: Optional[Any] = None  # 缺省值
+            default: Optional[Any] = None,  # 缺省值,
+            value_map: Dict[Any, Any] = None,
     ):
         if autoincrement and not primary_key:
             raise ValueError("autoincrement requires primary_key=True")
@@ -96,6 +97,7 @@ class SqliteColumn:
         self.not_null = not_null
         self.unique = unique
         self.default = default
+        self.value_map = value_map
 
     def _format_default(self) -> str:
         """格式化默认值为 SQL 字面量"""
@@ -134,14 +136,18 @@ class SqliteColumn:
 class SqliteTable:
     name: str
     column_dict: Dict[str, SqliteColumn]
+    _column_value_map: Dict[str, Dict[Any, Any]]
 
     def __init__(self, table_name: str, columns: Iterable[SqliteColumn] = None):
         self.name = table_name
         self.column_dict = {}
         self.cache = list()
+        self._column_value_map = dict()
         if columns:
             for column in columns:
                 self.column_dict[column.name] = column
+                if column.value_map:
+                    self._column_value_map[column.name] = column.value_map
 
     def to_sql_def(self, delete_if_exists: bool = False) -> str:
         """
@@ -171,12 +177,7 @@ class SqliteTable:
 
     def insert_record(self, conn: sqlite3.Connection, record: Dict[str, Any]):
         """插入单条记录"""
-        columns = SqliteTable.get_insert_columns_by_record(record)
-        placeholders = SqliteTable.get_insert_placeholder_by_record(record)
-        sql = f"INSERT INTO {self.name} ({', '.join(columns)}) VALUES ({placeholders})"
-        conn.execute(sql, tuple(record.values()))
-        conn.commit()
-
+        self.insert_records(conn, [record])
 
     def insert_records(self, conn: sqlite3.Connection, records: List[Dict[str, Any]]):
         """批量插入多条记录"""
@@ -185,7 +186,7 @@ class SqliteTable:
         columns = SqliteTable.get_insert_columns_by_record(records[0])
         placeholders = SqliteTable.get_insert_placeholder_by_record(records[0])
         sql = f"INSERT INTO {self.name} ({', '.join(columns)}) VALUES ({placeholders})"
-        values = SqliteTable.get_insert_values_by_records(records)
+        values = self.get_insert_values_by_records(records)
         conn.executemany(sql, values)
         conn.commit()
 
@@ -197,11 +198,10 @@ class SqliteTable:
     def get_insert_placeholder_by_record(record: Dict[str, Any]):
         return ', '.join(['?' for _ in record.keys()])
 
-    @staticmethod
-    def get_insert_values_by_records(records: List[Dict[str, Any]]):
+    def get_insert_values_by_records(self, records: List[Dict[str, Any]]):
         if not records:
             return []
-        return [tuple(r[k] for k in records[0].keys()) for r in records]
+        return [tuple(self._column_value_map.get(k, {}).get(r[k], r[k]) for k in records[0].keys()) for r in records]
 
 
 class SqliteDB:
@@ -209,7 +209,7 @@ class SqliteDB:
     conn: sqlite3.Connection
     table_cache: Dict[str, SqliteTable]
 
-    def __init__(self, path: str, auto_create: bool = True):
+    def __init__(self, path: str, auto_create: bool = True, with_dictionary_table: bool = False):
         self.path = os.path.realpath(path)
         if not os.path.exists(self.path):
             if not auto_create:
@@ -220,10 +220,36 @@ class SqliteDB:
 
         self.conn = sqlite3.connect(self.path)
         self.table_cache = {}
+        self.with_dictionary_table = with_dictionary_table
+        if self.with_dictionary_table:
+            self._create_dictionary_table()
 
     def create_table(self, table: SqliteTable, delete_if_exists: bool = True):
         table.create_table(self.conn, delete_if_exists)
         self.table_cache[table.name] = table
+        if not self.with_dictionary_table:
+            return
+        dictionary_table = self.get_table_by_name('dictionary')
+        for column_name, value_map in table._column_value_map.items():
+            for key, value in value_map.items():
+                dictionary_table.insert_record(self.conn, dict(
+                    table=table.name,
+                    column=column_name,
+                    key=value,
+                    value=key
+                ))
+        self.conn.commit()
+
+    def _create_dictionary_table(self):
+        _table_columns = [
+            SqliteColumn(name='table'),
+            SqliteColumn(name='column'),
+            SqliteColumn(name='key'),
+            SqliteColumn(name='value')
+        ]
+        _dictionary_table = SqliteTable('dictionary', _table_columns)
+        _dictionary_table.create_table(self.conn, delete_if_exists=True)
+        self.table_cache[_dictionary_table.name] = _dictionary_table
 
     def is_table_exists(self, table_name: str) -> bool:
         if table_name in self.table_cache:
