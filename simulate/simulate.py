@@ -93,4 +93,4 @@ class SimulateDeviceSnapshot:
             return self.simulated_allocator.unmap_segment(event)
         else:
             replay_logger.warning(f"Skip event{event.to_dict()} during replay.")
-            return False
+            return True
