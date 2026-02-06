@@ -24,6 +24,9 @@ class SimulateDeviceSnapshot:
         self.hookers = dict()
         self.simulated_allocator_context = AllocatorContext(snapshot=self.device_snapshot)
         self.simulated_allocator = SimulatedCachingAllocator(self.simulated_allocator_context)
+        # 识别昇腾torch-npu采集的snapshot中的workspace事件
+        if self.device_snapshot.trace_entries and self.device_snapshot.trace_entries[0].action == 'workspace_snapshot':
+            self.simulated_allocator_context.workspace_flag = True
 
     def register_hooker(self, hooker: SimulateHooker) -> int:
         idx = hash(hooker)

@@ -23,6 +23,7 @@ class AllocatorContext:
         self.device_snapshot = snapshot
         self.block_align_size = block_align_size
         self.current_undo_event: TraceEntry = None
+        self.workspace_flag = False
 
     def set_current_undo_event(self, undo_event: TraceEntry):
         self.current_undo_event = undo_event
@@ -74,7 +75,7 @@ class SimulatedCachingAllocator:
         :param alloc_event: 待回滚的alloc事件
         """
         _error = "Failed to simulate free block"
-        free_block_loc = self._find_active_block(alloc_event.addr, self._get_aligned_size(alloc_event.size))
+        free_block_loc = self._find_active_block(alloc_event.addr, alloc_event.size)
         if free_block_loc.seg_idx == -1 or free_block_loc.block_idx == -1:
             allocator_logger.error(f"{_error}: cannot find exist segment or active block.")
             return False
@@ -98,8 +99,7 @@ class SimulatedCachingAllocator:
         :param free_requested_event: 待回放的free_requested请求
         """
         _error = "Failed to simulate active block"
-        active_pending_free_block_loc = self._find_active_block(free_requested_event.addr, self._get_aligned_size(
-            free_requested_event.size))
+        active_pending_free_block_loc = self._find_active_block(free_requested_event.addr, free_requested_event.size)
         active_pending_free_block = self._get_block_by_loc(active_pending_free_block_loc)
         if active_pending_free_block is None or active_pending_free_block.state != BlockState.ACTIVE_PENDING_FREE:
             allocator_logger.error(f"{_error}: cannot find the block or is not in {BlockState.ACTIVE_PENDING_FREE} "
@@ -236,11 +236,21 @@ class SimulatedCachingAllocator:
         exist_segment = self.ctx.device_snapshot.segments[exist_seg_idx]
         exist_block_idx = bisect.bisect_left([_block.address for _block in exist_segment.blocks], block_addr)
         exist_block = exist_segment.blocks[exist_block_idx]
-        if exist_block.address != block_addr or self._get_aligned_size(exist_block.requested_size) != block_size:
+        if exist_block.address != block_addr:
             allocator_logger.error(f"{_error}: cannot found block (addr={block_addr}, size={block_size}) "
                                    f"in segment {exist_segment.to_dict()}")
             return BlockLoc(exist_seg_idx, -1)
+        if (self._get_aligned_size(exist_block.requested_size) != self._get_aligned_size(block_size) and
+                exist_block.size != block_size):
+            allocator_logger.warning(f"Something unexpected occurred during find active block: found a block{exist_block} "
+                                     f"with the same address but a different size(expected_size={block_size}, "
+                                     f"aligned_expected_size={self._get_aligned_size(block_size)})")
         if exist_block.state == BlockState.INACTIVE:
+            # 昇腾torch-npu场景下由于workspace事件存在，需要特殊处理
+            if self.ctx.workspace_flag:
+                allocator_logger.warning(f"Something unexpected occurred during find active block: found a block{exist_block} "
+                                         f"with the same address but is in inactive state.")
+                return BlockLoc(exist_seg_idx, exist_block_idx)
             allocator_logger.error(f"{_error}: the block (addr = {block_addr}) is not an active block")
             return BlockLoc(exist_seg_idx, -1)
         return BlockLoc(exist_seg_idx, exist_block_idx)
@@ -518,8 +528,9 @@ class SimulatedCachingAllocator:
         if exist_segment is None:
             return False
         # 更新统计值
-        exist_segment.active_size -= free_block.size
-        self.ctx.device_snapshot.total_activated -= free_block.size
+        if free_block.state != BlockState.INACTIVE:
+            exist_segment.active_size -= free_block.size
+            self.ctx.device_snapshot.total_activated -= free_block.size
         if free_block.state == BlockState.ACTIVE_ALLOCATED:
             exist_segment.allocated_size -= free_block.size
             self.ctx.device_snapshot.total_allocated -= free_block.size
