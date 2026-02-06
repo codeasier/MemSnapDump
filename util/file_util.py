@@ -25,8 +25,9 @@ def load_pickle_to_dict(pickle_file: Path) -> dict:
     try:
         with open(pickle_file, "rb") as f:
             data = pickle.load(f)
-    except pickle.UnpicklingError as e:
-        raise ValueError(f"文件不是有效的 pickle 格式: {pickle_file}") from e
+    except Exception:
+        import pandas as pd
+        data = pd.read_pickle(pickle_file).to_dict()
 
     if not isinstance(data, dict):
         raise ValueError(f"pickle 文件内容不是 dict 类型，实际类型: {type(data).__name__}")
