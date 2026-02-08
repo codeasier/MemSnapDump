@@ -138,7 +138,7 @@ def get_args():
 @timer
 def main():
     args = get_args()
-    dump(args.snapshot_file, Path(args.dump_dir) / f"{Path(args.snapshot_file)}.db")
+    dump(args.snapshot_file, Path(args.dump_dir) / f"{Path(args.snapshot_file).name}.db")
 
 
 if __name__ == '__main__':
