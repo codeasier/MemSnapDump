@@ -5,7 +5,7 @@ from simulate import SimulateHooker, SimulateDeviceSnapshot, AllocatorHooker
 from base import DeviceSnapshot, TraceEntry, Block, BlockState
 from util.file_util import check_dir_valid, load_pickle_to_dict
 
-from .database import SnapshotDb, block2record, event2record
+from tools.adaptors.database import SnapshotDb, block2record, event2record
 
 from util.logger import get_logger
 from util.timer import timer
