@@ -20,17 +20,16 @@ def load_pickle_to_dict(pickle_file: Path) -> dict:
         pickle.UnpicklingError: 反序列化失败（如文件损坏或非 pickle 格式）
     """
     if not pickle_file.is_file():
-        raise FileNotFoundError(f"文件不存在: {pickle_file}")
+        raise FileNotFoundError(f"Cannot found pickle file: {pickle_file}")
 
     try:
         with open(pickle_file, "rb") as f:
             data = pickle.load(f)
     except Exception:
-        import pandas as pd
-        data = pd.read_pickle(pickle_file).to_dict()
+        raise pickle.UnpicklingError(f"Cannot load pickle file: {pickle_file}")
 
     if not isinstance(data, dict):
-        raise ValueError(f"pickle 文件内容不是 dict 类型，实际类型: {type(data).__name__}")
+        raise ValueError(f"The content of the pickle file is not of type dict, actual type: {type(data).__name__}")
 
     return data
 
@@ -49,14 +48,14 @@ def save_dict_to_pickle(data: Dict[Any, Any], path: Path, protocol: int = 4) -> 
         OSError: 文件写入失败（如权限不足、磁盘满等）
     """
     if not isinstance(data, dict):
-        raise TypeError(f"仅支持 dict 类型，传入了: {type(data).__name__}")
+        raise TypeError(f"Only dict type is supported, but received: {type(data).__name__}")
     path.parent.mkdir(parents=True, exist_ok=True)  # 自动创建父目录
 
     try:
         with open(path, "wb") as f:
             pickle.dump(data, f, protocol=protocol)
     except OSError as e:
-        raise OSError(f"无法写入文件 {path}: {e}") from e
+        raise OSError(f"Unable to write to file {path}: {e}") from e
 
 
 def check_dir_valid(path: str | Path, need_readable: bool = True, need_writable: bool = True) -> bool:

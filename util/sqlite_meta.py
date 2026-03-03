@@ -34,15 +34,14 @@ def _sqlite_type_to_py_type(sqlite_type: str) -> type:
     upper = sqlite_type.upper()
     if "INT" in upper:
         return int
-    elif "CHAR" in upper or "CLOB" in upper or "TEXT" in upper:
+    if "CHAR" in upper or "CLOB" in upper or "TEXT" in upper:
         return str
-    elif "BLOB" in upper:
+    if "BLOB" in upper:
         return bytes
-    elif "REAL" in upper or "FLOA" in upper or "DOUB" in upper:
+    if "REAL" in upper or "FLOA" in upper or "DOUB" in upper:
         return float
-    else:
-        # 兜底：可能是 NUMERIC 或自定义类型，按 TEXT 处理
-        return str
+    # 兜底：可能是 NUMERIC 或自定义类型，按 TEXT 处理
+    return str
 
 
 import ast
@@ -141,7 +140,6 @@ class SqliteTable:
     def __init__(self, table_name: str, columns: Iterable[SqliteColumn] = None):
         self.name = table_name
         self.column_dict = {}
-        self.cache = list()
         self._column_value_map = dict()
         if columns:
             for column in columns:

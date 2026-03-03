@@ -16,8 +16,9 @@ def get_logger(name: str, level: int = logging.INFO) -> logging.Logger:
         logger.handlers.clear()
 
     formatter = logging.Formatter(
-        fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
+        fmt='{asctime} [{levelname:^6}][ {name:^12} ]: {message}',
+        datefmt='%Y-%m-%d %H:%M:%S',
+        style='{'
     )
 
     console_handler = logging.StreamHandler()

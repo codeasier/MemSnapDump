@@ -1,4 +1,5 @@
 import os
+import sys
 import argparse
 from pathlib import Path
 from simulate import SimulateHooker, SimulateDeviceSnapshot, AllocatorHooker
@@ -54,7 +55,7 @@ class SnapshotDbHandler:
 
 class DumpEventHooker(SimulateHooker, AllocatorHooker):
     def __init__(self, dump_dir: str, dump_cache_size: int = 1000):
-        self.db_handler = SnapshotDbHandler(dump_dir)
+        self.db_handler = SnapshotDbHandler(dump_dir, insert_cache_size=dump_cache_size)
 
     def post_undo_event(self, already_undo_event: TraceEntry, current_snapshot: DeviceSnapshot) -> bool:
         # 每个事件回放后dump一次event
@@ -92,20 +93,23 @@ class DumpEventHooker(SimulateHooker, AllocatorHooker):
         return True
 
     def post_replay_free_block(self, released_block: Block, current_snapshot: DeviceSnapshot):
-        super().pre_replay_free_block(released_block, current_snapshot)
         self.db_handler.insert_block(block2record(released_block))
 
     def __del__(self):
         self.db_handler.flush()
 
 
-def dump(pickle_file: str, dump_file: str):
-    data = load_pickle_to_dict(Path(pickle_file))
+def dump(pickle_file: str, dump_file: str) -> bool:
+    try:
+        data = load_pickle_to_dict(Path(pickle_file))
+    except Exception as e:
+        dump_logger.error("Failed to load pickle file: {}".format(e))
+        return False
     snapshot = SimulateDeviceSnapshot(data, 0)
     hooker = DumpEventHooker(dump_file)
     snapshot.register_hooker(hooker)
     snapshot.register_allocator_hooker(hooker)
-    snapshot.replay()
+    return snapshot.replay()
 
 
 def get_args():
@@ -135,10 +139,17 @@ def get_args():
     return args
 
 
-@timer
+class ExistCode:
+    SUCCESS = 0
+    FAILED = -1
+
+@timer(name="Dump snapshot to database.", logger=dump_logger)
 def main():
     args = get_args()
-    dump(args.snapshot_file, Path(args.dump_dir) / f"{Path(args.snapshot_file).name}.db")
+    if not dump(args.snapshot_file, Path(args.dump_dir) / f"{Path(args.snapshot_file).name}.db"):
+        dump_logger.error("Failed to dump the snapshot to database.")
+        sys.exit(ExistCode.FAILED)
+    sys.exit(ExistCode.SUCCESS)
 
 
 if __name__ == '__main__':

@@ -229,7 +229,7 @@ class SimulatedCachingAllocator:
     def _find_active_block(self, block_addr: int, block_size: int) -> BlockLoc:
         _error = "Failed to find active block"
         exist_seg_idx = self.ctx.device_snapshot.find_segment_idx_by_addr(block_addr)
-        if exist_seg_idx is None:
+        if exist_seg_idx == -1:
             allocator_logger.error(f"{_error}: cannot found the segment to which the active block belongs,"
                                    f" {block_addr}")
             return BlockLoc(-1, -1)
@@ -242,14 +242,16 @@ class SimulatedCachingAllocator:
             return BlockLoc(exist_seg_idx, -1)
         if (self._get_aligned_size(exist_block.requested_size) != self._get_aligned_size(block_size) and
                 exist_block.size != block_size):
-            allocator_logger.warning(f"Something unexpected occurred during find active block: found a block{exist_block} "
-                                     f"with the same address but a different size(expected_size={block_size}, "
-                                     f"aligned_expected_size={self._get_aligned_size(block_size)})")
+            allocator_logger.warning(
+                f"Something unexpected occurred during find active block: found a block{exist_block} "
+                f"with the same address but a different size(expected_size={block_size}, "
+                f"aligned_expected_size={self._get_aligned_size(block_size)})")
         if exist_block.state == BlockState.INACTIVE:
             # 昇腾torch-npu场景下由于workspace事件存在，需要特殊处理
             if self.ctx.workspace_flag:
-                allocator_logger.warning(f"Something unexpected occurred during find active block: found a block{exist_block} "
-                                         f"with the same address but is in inactive state.")
+                allocator_logger.warning(
+                    f"Something unexpected occurred during find active block: found a block{exist_block} "
+                    f"with the same address but is in inactive state.")
                 return BlockLoc(exist_seg_idx, exist_block_idx)
             allocator_logger.error(f"{_error}: the block (addr = {block_addr}) is not an active block")
             return BlockLoc(exist_seg_idx, -1)

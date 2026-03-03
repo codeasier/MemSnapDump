@@ -7,8 +7,8 @@ class SimulateHooker(ABC):
     def pre_undo_event(self, wait4undo_event: TraceEntry, current_snapshot: DeviceSnapshot) -> bool:
         """
             【READONLY】在回放事件前回调，此时事件列表**并未POP**出该事件
-        :param wait4undo_event: （只读）待回放的事件（仍在事件列表中）
-        :param current_snapshot: （只读）当前的内存块快照
+        :param wait4undo_event: 【只读】待回放的事件（仍在事件列表中）
+        :param current_snapshot: 【只读】当前的内存块快照
         :return 返回true继续执行，返回false将中断
         """
         ...
@@ -18,7 +18,7 @@ class SimulateHooker(ABC):
         """
             【READONLY】在回放事件后回调，此时snapshot已经将该事件从事件列表中丢弃，且segments已回放到事件发生前
         :param already_undo_event: 已回放的事件
-        :param current_snapshot: （只读）当前内存快照
+        :param current_snapshot: 【只读】当前内存快照
         :return 返回true继续执行，返回false将中断
         """
         ...
@@ -63,6 +63,7 @@ class AllocatorHooker(ABC):
         :param wait4alloc_map_segment: 【只读】待分配或map的内存段
         :param current_snapshot: 分配或map内存段前的内存快照
         """
+        ...
 
     def post_replay_map_or_alloc_segment(self, allocated_mapped_segment: Segment, current_snapshot: DeviceSnapshot):
         """
@@ -70,6 +71,7 @@ class AllocatorHooker(ABC):
         :param allocated_mapped_segment:【副本】已分配或map的内存段
         :param current_snapshot: 分配或map内存段后的内存快照
         """
+        ...
 
     def pre_replay_unmap_or_free_segment(self, wait4release_segment: Segment, current_snapshot: DeviceSnapshot):
         """

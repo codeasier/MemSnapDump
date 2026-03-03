@@ -87,10 +87,9 @@ class SimulateDeviceSnapshot:
             _segment = Segment.build_from_event(event)
             _segment.free_or_unmap_event_idx = event.idx
             return self.simulated_allocator.alloc_or_map_segment(_segment, merge=event.action == "segment_unmap")
-        elif event.action == "segment_alloc":
+        if event.action == "segment_alloc":
             return self.simulated_allocator.free_segment(event)
-        elif event.action == "segment_map":
+        if event.action == "segment_map":
             return self.simulated_allocator.unmap_segment(event)
-        else:
-            replay_logger.warning(f"Skip event{event.to_dict()} during replay.")
-            return True
+        replay_logger.warning(f"Skip event{event.to_dict()} during replay.")
+        return True
