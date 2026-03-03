@@ -1,3 +1,9 @@
+"""
+文件工具模块
+
+提供文件和目录操作的实用函数，包括 pickle 文件的读写、文件和目录的校验等功能。
+"""
+
 import os
 import pickle
 from pathlib import Path
@@ -60,11 +66,21 @@ def save_dict_to_pickle(data: Dict[Any, Any], path: Path, protocol: int = 4) -> 
 
 def check_dir_valid(path: str | Path, need_readable: bool = True, need_writable: bool = True) -> bool:
     """
-        校验目录是否合法, 默认要求可读可写
-    :param path: 路径字符串或pathlib.Path对象
-    :param need_readable: 是否要求可读
-    :param need_writable: 是否要求可写
-    :return: 是否合法
+    校验目录是否合法，默认要求可读可写。
+
+    Args:
+        path: 路径字符串或 pathlib.Path 对象
+        need_readable: 是否要求可读，默认为 True
+        need_writable: 是否要求可写，默认为 True
+
+    Returns:
+        bool: 目录是否合法且满足权限要求
+
+    Examples:
+        >>> check_dir_valid('/tmp', need_readable=True, need_writable=True)
+        True
+        >>> check_dir_valid('/nonexistent')
+        False
     """
     _path = path
     if not isinstance(path, Path):
@@ -80,11 +96,21 @@ def check_dir_valid(path: str | Path, need_readable: bool = True, need_writable:
 
 def check_file_valid(path: str | Path, need_readable: bool = True, need_writable: bool = False) -> bool:
     """
-        校验文件是否合法, 默认要求可读取，不要求可写
-    :param path: 路径字符串或pathlib.Path对象
-    :param need_readable: 是否要求可读
-    :param need_writable: 是否要求可写
-    :return:
+    校验文件是否合法，默认要求可读，不要求可写。
+
+    Args:
+        path: 路径字符串或 pathlib.Path 对象
+        need_readable: 是否要求可读，默认为 True
+        need_writable: 是否要求可写，默认为 False
+
+    Returns:
+        bool: 文件是否合法且满足权限要求
+
+    Examples:
+        >>> check_file_valid('/etc/passwd', need_readable=True, need_writable=False)
+        True
+        >>> check_file_valid('/nonexistent.txt')
+        False
     """
     _path = path
     if not isinstance(path, Path):
