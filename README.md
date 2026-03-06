@@ -48,7 +48,7 @@ torch_npu.npu.memory._record_memory_history()
 torch.cuda.memory._record_memory_history()
 ```
 #### 2.1.3 使用方式
-核心回放实现 `simulate/simulate.py`，其中`SimulateHooker`钩子类如下：
+核心回放实现 `simulate/simulate.py`，其中钩子类定义如下：
 ```python
 class SimulateHooker(ABC):
     @abstractmethod
@@ -56,7 +56,7 @@ class SimulateHooker(ABC):
         """
             【READONLY】在回放事件前回调，此时事件列表**并未POP**出该事件
         :param wait4undo_event: （只读）待回放的事件（仍在事件列表中）
-        :param current_snapshot: （制度）当前的内存块快照
+        :param current_snapshot: （只读）当前的内存块快照
         :return 返回true继续执行，返回false将中断
         """
         ...
@@ -70,6 +70,26 @@ class SimulateHooker(ABC):
         :return 返回true继续执行，返回false将中断
         """
         ...
+
+
+class AllocatorHooker(ABC):
+    def pre_replay_alloc_block(self, wait4alloc_block: Block, current_snapshot: DeviceSnapshot):
+        """在**回放时**分配一个内存块**前**回调，对应一个内存块释放事件回滚前"""
+        ...
+
+    def post_replay_alloc_block(self, allocated_block: Block, current_snapshot: DeviceSnapshot):
+        """在**回放时**分配一个内存块**后**回调，对应一个内存块释放事件回滚后"""
+        ...
+
+    def pre_replay_free_block(self, wait4free_block: Block, current_snapshot: DeviceSnapshot):
+        """在**回放时**释放一个内存块**前**回调，对应一个内存块申请事件回滚前"""
+        ...
+
+    def post_replay_free_block(self, released_block: Block, current_snapshot: DeviceSnapshot):
+        """在回放时，释放一个内存块**后**回调，对应一个内存块申请事件回滚后"""
+        ...
+
+    # 此外还包含 segment 相关的钩子方法
 ```
 使用示例代码如下：
 ```python
@@ -118,7 +138,7 @@ python tools.split [-h] [--device DEVICE] [--slices SLICES] [--max_entries MAX_E
   | `--max_entries`     | 整数 ≥1 | 否 | `15000`        | 单个切片最多包含的事件数（若指定 `slices`，此参数作为上限）                                    |
   | `--dump_type`, `-f` | `pkl` \| `json` | 否 | `pkl`          | 转储文件格式，仅支持 `pkl` 或 `json`                                             |
   | `--device`          | 整数 ≥0 | 否 | `0`            | 指定回放的设备索引（从 `device_traces` 中选择）                                      |
-#### 2.3.4 示例
+#### 2.2.4 示例
 假设已有采集自`0`卡的snapshot文件`/data/snapshot.pickle`，其包含**61**个内存事件，其采集时刻的数据可以表示为：`state.61 + evt[1:61]`
 
 _**方式一：按照固定切片数进行切片**_
@@ -152,36 +172,80 @@ python tools.split /data/snapshot.pickle --max_entries 20
 | 3    | `state.41` | `evt[22:41]` | 20   | slice_3_entry_22_41.pkl |
 | 4    | `state.61` | `evt[42:61]` | 20   | slice_4_entry_42_61.pkl |
 
+### 2.3 快照转数据库
+#### 2.3.1 简介
+快照转数据库功能可将 snapshot 数据转换为 SQLite 数据库格式，便于后续的数据分析、查询与可视化。该功能同样基于快照回放实现，通过 `DumpEventHooker` 在回放过程中将事件和内存块数据写入数据库。
+
+数据库包含以下两张核心表：
+- `trace_entry`：存储所有内存事件（包括内存分配、释放、段申请等），包含事件ID、动作类型、地址、大小、内存状态统计及调用栈信息。
+- `block`：存储内存块信息，包含地址、大小、请求大小、状态、分配/释放事件ID等。
+
+#### 2.3.2 使用约束
+同[快照回放](#212-使用约束)功能
+
+#### 2.3.3 使用方式
+```shell
+# 在项目根目录下执行
+python tools.dump2db [-h] [--dump_dir DUMP_DIR] snapshot_file
+```
+| 参数                  | 类型 | 必填 | 默认值            | 说明                                                                    |
+|---------------------|------|------|----------------|-----------------------------------------------------------------------|
+| `<snapshot_file>`   | 路径 | ✅ 是 | —              | 输入的 snapshot pickle 文件路径                                              |
+| `--dump_dir`, `-o`  | 路径 | 否 | snapshot文件所在目录 | 数据库文件输出目录                                                              |
+
+#### 2.3.4 示例
+假设已有 snapshot 文件 `/data/snapshot.pickle`，执行如下命令：
+
+```shell
+python tools.dump2db /data/snapshot.pickle -o /data/output
+```
+
+将在 `/data/output` 目录下生成 `/data/output/snapshot.pickle.db` 数据库文件。
 
 ## 3. 项目结构说明
 ```text
 MemSnapDump/
 ├── base/               # 基础Snapshot相关数据模型与实体定义
 │   ├── __init__.py     
-│   └── entities.py     # 定义核心数据结构（如 Event, Segment, DeviceTrace 等）
+│   └── entities.py     # 定义核心数据结构（如 Event, Segment, Block, TraceEntry 等）
 │
 ├── simulate/           # 模拟与回放逻辑
 │   ├── __init__.py     
-│   ├── hooker_defs.py                  # 各类回放过程中可派生的钩子类基类
+│   ├── hooker_defs.py                  # 各类回放过程中可派生的钩子类基类（SimulateHooker, AllocatorHooker）
 │   ├── simulated_caching_allocator.py  # 快照回放模拟内存分配器的核心定义与实现
 │   └── simulate.py                     # 主要类：SimulateDeviceSnapshot，负责事件回放与 hook 注册
 │
 ├── tools/                 # 工具模块：提供核心功能命令行工具
-│   └── slice_dump/        # 快照剪裁工具核心实现
+│   ├── split.py           # 快照切片命令行入口
+│   ├── dump2db.py         # 快照转数据库命令行入口
+│   ├── slice_dump/        # 快照剪裁工具核心实现
+│   │   ├── __init__.py
+│   │   ├── dump.py        # 命令行参数定义与解析
+│   │   └── hooker.py      # 实现快照剪裁的核心回放钩子
+│   └── adaptors/          # 数据适配器模块
 │       ├── __init__.py
-│       ├── dump.py        # 命令行参数定义与解析
-│       └── hooker.py      # 实现快照剪裁的核心回放钩子
-│   └── split.py       # 命令行代理
+│       ├── snapshot2db.py # 快照转数据库核心实现
+│       └── database/      # 数据库相关定义
+│           ├── __init__.py
+│           ├── defs.py        # 数据库字段定义
+│           ├── entity2record.py # 实体到记录的转换
+│           └── snapshot_db.py  # 数据库表结构定义
 │
 ├── util/               # 工具函数与辅助模块
 │   ├── __init__.py     
-│   └── logger.py       # 日志模块
+│   ├── logger.py       # 日志模块
+│   ├── timer.py        # 计时器装饰器
+│   ├── file_util.py    # 文件操作工具函数
+│   └── sqlite_meta.py  # SQLite 元数据管理模块
 │
 ├── test/                  # 测试代码
 │   ├── test-data/         # 测试用例的数据文件
 │   ├── common.py          # 测试用例中的公共方法
 │   ├── simulate_test.py   # 快照回放模块的单元测试
-│   └── slice_dump_test.py # 快照剪裁工具的单元测试
+│   └── tools_test/        # 工具模块测试
+│       ├── slice_dump_test.py   # 快照剪裁工具的单元测试
+│       ├── snapshot2db_test.py  # 快照转数据库的单元测试
+│       └── snapshot_db_analyze.py # 数据库分析测试工具
 │
 └── README.md           # 项目说明文档
 ```
