@@ -186,12 +186,13 @@ python tools.split /data/snapshot.pickle --max_entries 20
 #### 2.3.3 使用方式
 ```shell
 # 在项目根目录下执行
-python tools.dump2db [-h] [--dump_dir DUMP_DIR] snapshot_file
+python tools.dump2db [-h] [--dump_dir DUMP_DIR] [--log LOG_FILE] snapshot_file
 ```
 | 参数                  | 类型 | 必填 | 默认值            | 说明                                                                    |
 |---------------------|------|------|----------------|-----------------------------------------------------------------------|
 | `<snapshot_file>`   | 路径 | ✅ 是 | —              | 输入的 snapshot pickle 文件路径                                              |
 | `--dump_dir`, `-o`  | 路径 | 否 | snapshot文件所在目录 | 数据库文件输出目录                                                              |
+| `--log`, `-l`       | 路径 | 否 | —              | 日志文件输出路径。若指定，所有模块的日志将同时输出到控制台和该文件；若文件已存在则覆盖 |
 
 #### 2.3.4 示例
 假设已有 snapshot 文件 `/data/snapshot.pickle`，执行如下命令：
@@ -201,6 +202,14 @@ python tools.dump2db /data/snapshot.pickle -o /data/output
 ```
 
 将在 `/data/output` 目录下生成 `/data/output/snapshot.pickle.db` 数据库文件。
+
+若需要将日志保存到文件以便后续分析：
+
+```shell
+python tools.dump2db /data/snapshot.pickle -o /data/output -l /data/output/dump.log
+```
+
+日志文件将记录所有模块（LOAD、REPLAY、ALLOCATOR、DatabaseDump）的输出信息。
 
 ## 3. 项目结构说明
 ```text
