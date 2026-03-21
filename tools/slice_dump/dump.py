@@ -67,8 +67,8 @@ def slice_dump():
         dump_logger.warning(f"The snapshot file did not record any event data for the specified device {args.device}.")
         return
     dump_logger.info(f"Start loading snapshot with {len(df['segments'])} segments, "
-                     f"{len(df['device_traces'][0])} events")
-    snapshot = SimulateDeviceSnapshot(df, 0)
+                     f"{len(df['device_traces'][args.device])} events")
+    snapshot = SimulateDeviceSnapshot(df, args.device)
     dump_logger.info("Successfully loaded snapshot, starting to replay and dump.")
     slice_dump_hooker = SliceDumpHooker(dump_dir=args.dump_dir,
                                         num_of_slices=args.slices,

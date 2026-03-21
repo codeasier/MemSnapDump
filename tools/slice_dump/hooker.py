@@ -81,7 +81,7 @@ class SliceDumpHooker(SimulateHooker):
     def post_undo_event(self, already_undo_event: TraceEntry, current_snapshot: DeviceSnapshot):
         self.events_buffer.insert(0, already_undo_event)
         if self._is_need_dump(current_snapshot):
-            self.dump()
+            self.dump(current_snapshot.device)
             self.prev_segments = copy.deepcopy(current_snapshot.segments)
             self.events_buffer.clear()
         return True
@@ -95,9 +95,10 @@ class SliceDumpHooker(SimulateHooker):
             return True
         return False
 
-    def dump(self):
+    def dump(self, device:int):
         slice_snapshot_name = self._get_dump_filename()
         slice_snapshot = DeviceSnapshot()
+        slice_snapshot.device = device
         slice_snapshot.segments = self.prev_segments
         slice_snapshot.trace_entries = self.events_buffer
         slice_snapshot_dict = slice_snapshot.to_dict()
