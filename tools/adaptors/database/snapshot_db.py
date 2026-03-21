@@ -50,19 +50,34 @@ class SnapshotDb(SqliteDB):
 
     def __init__(self, path: str):
         super().__init__(path, auto_create=True, with_dictionary_table=True)
-        self.create_block_table()
-        self.create_trace_entry_table()
+        # 清理旧版本表格
+        self._clear_old_tables()
 
-    def create_trace_entry_table(self):
-        self.create_table(SqliteTable(SnapshotDb.TRACE_ENTRY_TABLE_NAME, _TRACE_ENTRY_TABLE_COLUMNS),
+    def create_trace_entry_table(self, device: int = 0):
+        self.create_table(SqliteTable(self.get_trace_table_name_by_device(device), _TRACE_ENTRY_TABLE_COLUMNS),
                           delete_if_exists=True)
 
-    def create_block_table(self):
-        self.create_table(SqliteTable(SnapshotDb.BLOCK_TABLE_NAME, _BLOCK_TABLE_COLUMNS),
+    def create_block_table(self, device: int = 0):
+        self.create_table(SqliteTable(self.get_block_table_name_by_device(device), _BLOCK_TABLE_COLUMNS),
                           delete_if_exists=True)
 
-    def get_trace_entry_table(self):
-        return self.get_table_by_name(SnapshotDb.TRACE_ENTRY_TABLE_NAME)
+    def get_trace_entry_table(self, device: int = 0):
+        return self.get_table_by_name(self.get_trace_table_name_by_device(device))
 
-    def get_block_table(self):
-        return self.get_table_by_name(SnapshotDb.BLOCK_TABLE_NAME)
+    def get_block_table(self, device: int = 0):
+        return self.get_table_by_name(self.get_block_table_name_by_device(device))
+
+    def _clear_old_tables(self):
+        """
+            旧版本中创建的db不带device前缀，如果通过旧db打开，需要清理旧表
+        """
+        self.delete_table(self.TRACE_ENTRY_TABLE_NAME)
+        self.delete_table(self.BLOCK_TABLE_NAME)
+
+    @staticmethod
+    def get_block_table_name_by_device(device: int = 0):
+        return f"{SnapshotDb.BLOCK_TABLE_NAME}_{device}"
+
+    @staticmethod
+    def get_trace_table_name_by_device(device: int = 0):
+        return f"{SnapshotDb.TRACE_ENTRY_TABLE_NAME}_{device}"

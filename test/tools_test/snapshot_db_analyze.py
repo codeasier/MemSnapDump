@@ -28,8 +28,9 @@ class EventRowDefs:
 
 
 class TestSnapshotDbHandler:
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, device: int):
         self.conn = sqlite3.connect(db_path)
+        self.device = device
 
     @staticmethod
     def _block_state_by_value_map(state_code: int):
@@ -140,9 +141,9 @@ class TestSnapshotDbHandler:
             seg.blocks.sort(key=lambda b: b.address)
 
     def query_segment_events_until(self, event_id: int) -> List[TraceEntry]:
-        query_events_sql = """
+        query_events_sql = f"""
                            select *
-                           from trace_entry
+                           from trace_entry_{self.device} 
                            where id <= ?
                              and (action between 0 and 3) \
                            """
@@ -152,9 +153,9 @@ class TestSnapshotDbHandler:
         return [TestSnapshotDbHandler.build_trace_entry_by_row(row) for row in rows]
 
     def query_blocks_by_event_id(self, event_id) -> List[Block]:
-        query_block_sql = """
+        query_block_sql = f"""
                           select *
-                          from block
+                          from block_{self.device}
                           where allocEventId <= ?
                             and (freeEventId > ? or freeEventId < 0)
                           """
