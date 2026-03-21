@@ -20,19 +20,7 @@ _PY_TYPE_TO_SQLITE = {
 
 
 def _map_py_type_to_sqlite(py_type: Type) -> str:
-    """
-    将 Python 类型转换为 SQLite 类型声明。
-
-    Args:
-        py_type: Python 类型对象
-
-    Returns:
-        str: 对应的 SQLite 类型声明字符串
-
-    Note:
-        - 支持 Optional[T] 类型，会自动提取内部类型
-        - 未识别的类型默认返回 "TEXT"
-    """
+    """将 Python 类型转换为 SQLite 类型"""
     origin = get_origin(py_type) or py_type
     if origin in _PY_TYPE_TO_SQLITE:
         return _PY_TYPE_TO_SQLITE[origin]
@@ -47,22 +35,7 @@ def _map_py_type_to_sqlite(py_type: Type) -> str:
 
 
 def _sqlite_type_to_py_type(sqlite_type: str) -> type:
-    """
-    将 SQLite 类型声明映射为最可能的 Python 类型。
-
-    Args:
-        sqlite_type: SQLite 类型声明字符串
-
-    Returns:
-        type: 对应的 Python 类型对象
-
-    Note:
-        - INTEGER -> int
-        - TEXT/CHAR/CLOB -> str
-        - BLOB -> bytes
-        - REAL/FLOAT/DOUBLE -> float
-        - 其他类型默认返回 str
-    """
+    """将 SQLite 声明类型映射为最可能的 Python 类型"""
     if not sqlite_type:
         return str  # 无类型默认为 TEXT
     upper = sqlite_type.upper()
@@ -82,20 +55,7 @@ import ast
 
 
 def _parse_default_value(dflt_str: str) -> Any:
-    """
-    将 PRAGMA 返回的默认值字符串转为 Python 对象。
-
-    Args:
-        dflt_str: PRAGMA 返回的默认值字符串
-
-    Returns:
-        Any: 解析后的 Python 对象
-
-    Note:
-        - 支持数字、字符串、布尔值、None 的解析
-        - SQLite 中的布尔值 '1'/'0' 会转换为 True/False
-        - 无法解析的字符串会保留原样（去除引号）
-    """
+    """将 PRAGMA 返回的默认值字符串转为 Python 对象"""
     if dflt_str is None:
         return None
 
@@ -157,23 +117,6 @@ class SqliteColumn:
             default: Optional[Any] = None,  # 缺省值,
             value_map: Dict[Any, Any] = None,
     ):
-        """
-        初始化列定义。
-
-        Args:
-            name: 列名
-            data_type: Python 类型，默认为 str
-            primary_key: 是否为主键，默认为 False
-            autoincrement: 是否自增，默认为 False（需要 primary_key=True）
-            not_null: 是否不允许 NULL，默认为 False
-            unique: 是否唯一，默认为 False
-            default: 默认值，默认为 None
-            value_map: 值映射字典，用于插入时的值转换
-
-        Raises:
-            ValueError: 如果 autoincrement=True 但 primary_key=False
-            ValueError: 如果 autoincrement=True 但 data_type 不是 int
-        """
         if autoincrement and not primary_key:
             raise ValueError("autoincrement requires primary_key=True")
         if autoincrement and data_type is not int:
@@ -188,18 +131,7 @@ class SqliteColumn:
         self.value_map = value_map
 
     def _format_default(self) -> str:
-        """
-        格式化默认值为 SQL 字面量。
-
-        Returns:
-            str: SQL 格式的默认值字符串
-
-        Note:
-            - None -> 'NULL'
-            - bool -> '1' 或 '0'
-            - str -> "'value'"（自动转义单引号）
-            - int/float -> 直接转字符串
-        """
+        """格式化默认值为 SQL 字面量"""
         val = self.default
         if val is None:
             return "NULL"
@@ -269,13 +201,6 @@ class SqliteTable:
     _column_value_map: Dict[str, Dict[Any, Any]]
 
     def __init__(self, table_name: str, columns: Iterable[SqliteColumn] = None):
-        """
-        初始化表定义。
-
-        Args:
-            table_name: 表名
-            columns: 列定义的可迭代对象，可选
-        """
         self.name = table_name
         self.column_dict = {}
         self._column_value_map = dict()
@@ -312,19 +237,22 @@ class SqliteTable:
 
     def create_table(self, conn: sqlite3.Connection, delete_if_exists: bool = False):
         """
-        在数据库中创建表。
-
-        Args:
-            conn: sqlite3.Connection 对象
-            delete_if_exists: 是否先删除已存在的表，默认为 False
-
-        Examples:
-            >>> import sqlite3
-            >>> conn = sqlite3.connect(':memory:')
-            >>> table.create_table(conn)
+        在数据库中创建表
+        :param conn: sqlite3.Connection 对象
+        :param delete_if_exists: 是否先删除已存在的表
         """
         sql = self.to_sql_def(delete_if_exists=delete_if_exists)
         conn.executescript(sql)  # 支持多条 SQL（如 DROP + CREATE）
+        conn.commit()
+
+    def create_index(self, conn: sqlite3.Connection, column_name: str):
+        """
+        创建索引
+        :param conn: sqlite3.Connection 对象
+        :param column_name: 列名
+        :return:
+        """
+        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.name}_{column_name} ON {self.name} ({column_name});")
         conn.commit()
 
     def insert_record(self, conn: sqlite3.Connection, record: Dict[str, Any]):
@@ -431,17 +359,6 @@ class SqliteDB:
     table_cache: Dict[str, SqliteTable]
 
     def __init__(self, path: str, auto_create: bool = True, with_dictionary_table: bool = False):
-        """
-        初始化数据库连接。
-
-        Args:
-            path: 数据库文件路径
-            auto_create: 如果文件不存在是否自动创建，默认为 True
-            with_dictionary_table: 是否创建字典表用于存储值映射，默认为 False
-
-        Raises:
-            FileNotFoundError: 当 auto_create=False 且数据库文件不存在时
-        """
         self.path = os.path.realpath(path)
         if not os.path.exists(self.path):
             if not auto_create:
@@ -482,8 +399,11 @@ class SqliteDB:
                 ))
         self.conn.commit()
 
+    def delete_table(self, table_name: str):
+        self.conn.execute(f"DROP TABLE IF EXISTS {table_name};")
+        self.conn.commit()
+
     def _create_dictionary_table(self):
-        """创建字典表，用于存储表列的值映射。"""
         _table_columns = [
             SqliteColumn(name='table'),
             SqliteColumn(name='column'),
