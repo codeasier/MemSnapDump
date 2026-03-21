@@ -1,7 +1,8 @@
 from typing import Dict
 
 from util import get_logger
-from base import *
+from logging import Logger
+from base import DeviceSnapshot, Segment, TraceEntry, Block, BlockState
 
 from .simulated_caching_allocator import SimulatedCachingAllocator, AllocatorContext
 from .hooker_defs import SimulateHooker, AllocatorHooker
@@ -9,19 +10,25 @@ from .hooker_defs import SimulateHooker, AllocatorHooker
 loading_logger = get_logger("LOAD")
 replay_logger = get_logger("REPLAY")
 
-
 class SimulateDeviceSnapshot:
     device_snapshot: DeviceSnapshot
     hookers: Dict[int, SimulateHooker]
 
-    def __init__(self, snapshot_dict: dict, device: int = 0):
+    device: int
+    _loading_logger: Logger
+    _replay_logger: Logger
+
+    def __init__(self, snapshot_dict: dict, device: int):
+        # 基于device初始化logger
+        self._loading_logger = loading_logger.getChild(f"{device}")
+        self._replay_logger = replay_logger.getChild(f"{device}")
         if not snapshot_dict:
             raise RuntimeError("Cannot init snapshot from empty data.")
-        loading_logger.info(f"Loading snapshot data...")
+        self._loading_logger.info(f"Loading snapshot data...")
         self.device_snapshot = DeviceSnapshot.from_dict(snapshot_dict, device)
-        loading_logger.info(f"Successfully loaded snapshot data: total of {len(self.device_snapshot.trace_entries)} "
+        self._loading_logger.info(f"Finished to load snapshot data: total of {len(self.device_snapshot.trace_entries)} "
                             f"entries and {len(self.device_snapshot.segments)} segments.")
-        self.hookers = dict()
+        self.hookers = dict[int, SimulateHooker]()
         self.simulated_allocator_context = AllocatorContext(snapshot=self.device_snapshot)
         self.simulated_allocator = SimulatedCachingAllocator(self.simulated_allocator_context)
         # 识别昇腾torch-npu采集的snapshot中的workspace事件
@@ -49,29 +56,29 @@ class SimulateDeviceSnapshot:
         """
         # 倒序遍历
         total_size = len(self.device_snapshot.trace_entries)
-        replay_logger.info(f"Replaying {total_size} entries in snapshot...")
+        self._replay_logger.info(f"Replaying {total_size} entries in snapshot...")
         progress_update_point = [0.25, 0.5, 0.75]
         while self.device_snapshot.trace_entries:
             for hooker in self.hookers.values():
                 if hooker and not hooker.pre_undo_event(self.device_snapshot.trace_entries[-1], self.device_snapshot):
-                    replay_logger.error(f"An interruption occurred during the replay of the single event pre hook.")
+                    self._replay_logger.error(f"An interruption occurred during the replay of the single event pre hook.")
                     return False
             event = self.device_snapshot.trace_entries[-1]
             self.simulated_allocator_context.set_current_undo_event(event)
             if not self._replay_single_event(event):
-                replay_logger.error(f"An interruption occurred during the replay of the single event.")
+                self._replay_logger.error(f"An interruption occurred during the replay of the single event.")
                 return False
             self.device_snapshot.trace_entries.pop()
             current_size = len(self.device_snapshot.trace_entries)
             if progress_update_point and progress_update_point[-1] * total_size >= current_size:
-                replay_logger.info(f"{(1 - progress_update_point[-1]) * 100}% of entries have been processed, "
+                self._replay_logger.info(f"{(1 - progress_update_point[-1]) * 100}% of entries have been processed, "
                                    f"{current_size} entries remain.")
                 progress_update_point.pop()
             for hooker in self.hookers.values():
                 if hooker and not hooker.post_undo_event(event, self.device_snapshot):
-                    replay_logger.error(f"An interruption occurred during the replay of the single event post hook.")
+                    self._replay_logger.error(f"An interruption occurred during the replay of the single event post hook.")
                     return False
-        replay_logger.info("All events have been successfully replayed.")
+        self._replay_logger.info("All events have been successfully replayed.")
         return True
 
     def _replay_single_event(self, event: TraceEntry) -> bool:
@@ -91,5 +98,5 @@ class SimulateDeviceSnapshot:
             return self.simulated_allocator.free_segment(event)
         if event.action == "segment_map":
             return self.simulated_allocator.unmap_segment(event)
-        replay_logger.warning(f"Skip event{event.to_dict()} during replay.")
+        self._replay_logger.warning(f"Skip event{event.to_dict()} during replay.")
         return True
