@@ -14,9 +14,13 @@ tools/
 │   ├── dump.py        # 参数解析与入口
 │   └── hooker.py      # SliceDumpHooker 实现
 └── adaptors/          # 数据适配器
-    ├── snapshot2db.py # 数据库转换核心实现
+    ├── snapshot2db.py # 数据库转换核心实现（支持多设备）
     └── database/      # 数据库相关定义
 ```
+
+## 多设备支持
+
+快照转数据库功能现已支持多设备快照。每个设备的数据存储在独立的数据库表中，表名带有设备后缀（如 `trace_entry_0`, `block_0`）。
 
 ## 快照切片 (split)
 

@@ -77,11 +77,12 @@ def post_undo_event(self, event, snapshot) -> bool:
     """缓存事件，判断是否需要 dump"""
     self.events_buffer.insert(0, event)
     if self._is_need_dump(snapshot):
-        self.dump()
+        self.dump(snapshot.device)
 
-def dump(self):
+def dump(self, device: int):
     """执行切片输出"""
     slice_snapshot = DeviceSnapshot()
+    slice_snapshot.device = device
     slice_snapshot.segments = self.prev_segments
     slice_snapshot.trace_entries = self.events_buffer
     # 保存为 pkl 或 json

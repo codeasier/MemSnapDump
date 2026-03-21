@@ -114,22 +114,24 @@ from tools.adaptors.database import SnapshotDb
 db = SnapshotDb('/path/to/snapshot.db')
 ```
 
-### 插入事件
+### 插入事件（多设备）
 ```python
 from tools.adaptors.database import event2record, block2record
 
-# 插入事件
+# 插入设备0的事件
+db.create_trace_entry_table(device=0)
 event_record = event2record(
     event=trace_entry,
     allocated=snapshot.total_allocated,
     active=snapshot.total_activated,
     reserved=snapshot.total_reserved
 )
-db.get_trace_entry_table().insert_record(db.conn, event_record)
+db.get_trace_entry_table(device=0).insert_record(db.conn, event_record)
 
-# 插入块
+# 插入设备1的块
+db.create_block_table(device=1)
 block_record = block2record(block)
-db.get_block_table().insert_record(db.conn, block_record)
+db.get_block_table(device=1).insert_record(db.conn, block_record)
 ```
 
 ### 查询数据
@@ -138,17 +140,17 @@ import sqlite3
 
 conn = sqlite3.connect('/path/to/snapshot.db')
 
-# 查询所有分配事件
-cursor = conn.execute("SELECT * FROM trace_entry WHERE action = 4")
+# 查询设备0的所有分配事件
+cursor = conn.execute("SELECT * FROM trace_entry_0 WHERE action = 4")
 
-# 查询活跃块
-cursor = conn.execute("SELECT * FROM block WHERE state = 1")
+# 查询设备1的活跃块
+cursor = conn.execute("SELECT * FROM block_1 WHERE state = 1")
 
-# 联表查询：块及其分配事件
+# 联表查询：设备0的块及其分配事件
 cursor = conn.execute("""
     SELECT b.address, b.size, e.callstack
-    FROM block b
-    JOIN trace_entry e ON b.allocEventId = e.id
+    FROM block_0 b
+    JOIN trace_entry_0 e ON b.allocEventId = e.id
     WHERE b.state = 1
 """)
 ```
@@ -158,7 +160,7 @@ cursor = conn.execute("""
 # 从 dictionary 表获取映射
 cursor = conn.execute("""
     SELECT * FROM dictionary 
-    WHERE `table` = 'trace_entry' AND `column` = 'action'
+    WHERE `table` = 'trace_entry_0' AND `column` = 'action'
 """)
 for row in cursor.fetchall():
     print(f"{row['key']} -> {row['value']}")
@@ -169,3 +171,6 @@ for row in cursor.fetchall():
 1. **字典表**: 自动创建 `dictionary` 表存储编码映射
 2. **默认值**: block.state 默认值为 99（未知状态）
 3. **类型转换**: 字符串值自动转换为整数编码存储
+4. **多设备支持**: 每个设备独立建表，表名格式为 `{table_name}_{device}`
+5. **旧版本兼容**: `_clear_old_tables()` 自动清理旧版本（不带设备后缀）的表格
+6. **None值处理**: entity2record 函数会处理 event.idx 和 block.alloc_event_idx 为 None 的情况

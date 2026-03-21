@@ -229,6 +229,7 @@ Python 类型到 SQLite 类型的自动映射:
 ## 注意事项
 
 1. **日志单例**: 同名 logger 会复用，避免重复添加 handler
-2. **pickle 版本**: 默认使用 protocol=4，兼容 Python 3.4+
-3. **字典表**: 启用 `with_dictionary_table` 会自动创建值映射表
-4. **表缓存**: SqliteDB 会缓存表结构，避免重复查询
+2. **全局日志文件**: `set_global_log_file()` 可设置全局日志文件，所有 logger 都会输出到该文件
+3. **pickle 版本**: 默认使用 protocol=4，兼容 Python 3.4+
+4. **字典表**: 启用 `with_dictionary_table` 会自动创建值映射表
+5. **表缓存**: SqliteDB 会缓存表结构，避免重复查询

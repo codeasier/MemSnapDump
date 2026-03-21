@@ -64,3 +64,17 @@ python tools.dump2db /path/to/snapshot.pkl -o /output/dir
 - Python 3.10+
 - pandas（用于解析 pickle 文件）
 - 标准库: pickle, sqlite3, json, argparse
+
+## 日志系统
+
+项目使用统一的日志系统，支持全局日志文件输出：
+
+```python
+from util import get_logger, set_global_log_file
+
+# 设置全局日志文件（可选，所有 logger 都会输出到该文件）
+set_global_log_file('/path/to/app.log')
+
+logger = get_logger(__name__)
+logger.info("Processing started")
+```
