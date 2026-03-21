@@ -1,18 +1,33 @@
+import sys
+from pathlib import Path
+
+project_dir = Path(__file__).parent.parent.parent.resolve()
+if project_dir not in sys.path:
+    sys.path.append(str(project_dir))
+
 import os
 import shutil
 import unittest
-from pathlib import Path
 from util.file_util import load_pickle_to_dict
+from util.logger import suppress_logs, restore_logs
 from simulate import SimulateDeviceSnapshot
 from tools.slice_dump.hooker import SliceDumpHooker
-from test.simulate_test import TestReplayEventHooker
+from ut.simulate.test_simulate import TestReplayEventHooker
 
-current_dir = Path(__file__).parent.resolve()
+test_data_dir = Path(__file__).parent.parent.resolve() / 'test-data'
 
 
 class SliceDumpTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        suppress_logs()
+
+    @classmethod
+    def tearDownClass(cls):
+        restore_logs()
+
     def setUp(self):
-        self.tmp_out_dir = current_dir / '../test-data/slices'
+        self.tmp_out_dir = test_data_dir / 'slices'
         if os.path.exists(self.tmp_out_dir):
             shutil.rmtree(self.tmp_out_dir)
         os.makedirs(self.tmp_out_dir)
@@ -21,7 +36,7 @@ class SliceDumpTest(unittest.TestCase):
         shutil.rmtree(self.tmp_out_dir)
 
     def testSplitSnapshotWithDefaultArgs(self):
-        snapshot_path = current_dir / '../test-data/' / 'snapshot_with_empty_cache.pkl'
+        snapshot_path = test_data_dir / 'snapshot_with_empty_cache.pkl'
         snapshot = SimulateDeviceSnapshot(load_pickle_to_dict(snapshot_path), 0)
         total_entries = len(snapshot.device_snapshot.trace_entries)
         expect_slices = max(total_entries // 15000, 4)
@@ -38,7 +53,7 @@ class SliceDumpTest(unittest.TestCase):
             self.assertTrue(snapshot_slice.replay())
 
     def testSplitExpandableSnapshot(self):
-        snapshot_path = current_dir / '../test-data/' / 'snapshot_with_empty_cache_expandable.pkl'
+        snapshot_path = test_data_dir / 'snapshot_with_empty_cache_expandable.pkl'
         snapshot = SimulateDeviceSnapshot(load_pickle_to_dict(snapshot_path), 0)
         total_entries = len(snapshot.device_snapshot.trace_entries)
         expect_slices = max(total_entries // 15000, 4)
@@ -53,3 +68,8 @@ class SliceDumpTest(unittest.TestCase):
             snapshot_slice = SimulateDeviceSnapshot(load_pickle_to_dict(pkl_file), 0)
             snapshot_slice.register_hooker(TestReplayEventHooker(self))
             self.assertTrue(snapshot_slice.replay())
+
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main(verbosity=2, module="test_slice_dump")

@@ -1,14 +1,20 @@
+import sys
+from pathlib import Path
+
+project_dir = Path(__file__).parent.parent.parent.resolve()
+if project_dir not in sys.path:
+    sys.path.append(str(project_dir))
+
 import unittest
 import copy
-from pathlib import Path
 from base import TraceEntry, DeviceSnapshot, Segment, Block, BlockState
 from util.file_util import load_pickle_to_dict
+from util.logger import suppress_logs, restore_logs
 from simulate import SimulateDeviceSnapshot, SimulateHooker
 from simulate.hooker_defs import AllocatorHooker
-from test.common import valid_segments
+from ut.common import valid_segments
 
-current_dir = Path(__file__).parent.resolve()
-
+test_data_dir = Path(__file__).parent.parent.resolve() / 'test-data'
 
 class TestReplayEventHooker(SimulateHooker):
     def __init__(self, test_util, valid_interval: int = 100):
@@ -20,7 +26,6 @@ class TestReplayEventHooker(SimulateHooker):
         return True
 
     def post_undo_event(self, already_undo_event: TraceEntry, current_snapshot: DeviceSnapshot) -> bool:
-        # 每经历valid_interval个事件校验一次segment
         if self.replay_count % self.valid_interval == 0:
             valid_segments(current_snapshot.segments, self.test_util)
         return True
@@ -65,14 +70,18 @@ class TestReplayBlockHooker(AllocatorHooker):
 
 class TestSimulate(unittest.TestCase):
 
-    def setUp(self):
-        self.snapshot_path = current_dir / 'test-data/snapshot_1768383987920985470.pkl'
-        self.vmem_snapshot_path = current_dir / 'test-data/snapshot_expandable.pkl'
-        self.snapshot_with_empty_cache_path = current_dir / 'test-data/snapshot_with_empty_cache.pkl'
-        self.vmem_snapshot_with_empty_cache_path = current_dir / 'test-data/snapshot_with_empty_cache_expandable.pkl'
+    snapshot_path = test_data_dir / 'snapshot_1768383987920985470.pkl'
+    vmem_snapshot_path = test_data_dir / 'snapshot_expandable.pkl'
+    snapshot_with_empty_cache_path = test_data_dir / 'snapshot_with_empty_cache.pkl'
+    vmem_snapshot_with_empty_cache_path = test_data_dir / 'snapshot_with_empty_cache_expandable.pkl'
 
-    def tearDown(self):
-        ...
+    @classmethod
+    def setUpClass(cls):
+        suppress_logs()
+
+    @classmethod
+    def tearDownClass(cls):
+        restore_logs()
 
     @staticmethod
     def get_simulate_snapshot(snapshot_path: Path):
@@ -121,3 +130,8 @@ class TestSimulate(unittest.TestCase):
         snapshot = TestSimulate.get_simulate_snapshot(self.vmem_snapshot_with_empty_cache_path)
         snapshot.register_hooker(TestReplayEventHooker(self))
         self.assertTrue(snapshot.replay())
+
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main(verbosity=2, module="test_simulate")

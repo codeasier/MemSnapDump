@@ -1,21 +1,11 @@
-"""
--------------------------------------------------------------------------
-This file is part of the MindStudio project.
-Copyright (c) 2026 Huawei Technologies Co.,Ltd.
+import sys
+from pathlib import Path
 
-MindStudio is licensed under Mulan PSL v2.
-You can use this software according to the terms and conditions of the Mulan PSL v2.
-You may obtain a copy of Mulan PSL v2 at:
+project_dir = Path(__file__).parent.parent.parent.resolve()
+if project_dir not in sys.path:
+    sys.path.append(str(project_dir))
 
-         http://license.coscl.org.cn/MulanPSL2
-
-THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-See the Mulan PSL v2 for more details.
--------------------------------------------------------------------------
-"""
-
+from tkinter import N
 import unittest
 from base import Frame, TraceEntry, Block, BlockState, Segment, DeviceSnapshot
 
@@ -372,3 +362,8 @@ class TestDeviceSnapshot(unittest.TestCase):
         result = snapshot.to_dict()
         self.assertIn("segments", result)
         self.assertIn("device_traces", result)
+
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main(verbosity=2, module="test_entities")

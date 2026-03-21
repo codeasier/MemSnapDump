@@ -1,7 +1,14 @@
+import sys
+from pathlib import Path
+
+project_dir = Path(__file__).parent.parent.parent.resolve()
+if project_dir not in sys.path:
+    sys.path.append(str(project_dir))
+
 import bisect
 import sqlite3
 from typing import List
-from base import *
+from base import Segment, Block, TraceEntry
 from tools.adaptors.database import TRACE_ENTRY_ACTION_VALUE_MAP, BLOCK_STATE_VALUE_MAP
 
 
@@ -27,7 +34,7 @@ class EventRowDefs:
     CALLSTACK = 8
 
 
-class TestSnapshotDbHandler:
+class SnapshotDbHandler:
     def __init__(self, db_path: str, device: int):
         self.conn = sqlite3.connect(db_path)
         self.device = device
@@ -52,7 +59,7 @@ class TestSnapshotDbHandler:
             address=row[BlockRowDefs.ADDR],
             size=row[BlockRowDefs.SIZE],
             requested_size=row[BlockRowDefs.REQUESTED_SIZE],
-            state=TestSnapshotDbHandler._block_state_by_value_map(row[BlockRowDefs.STATE]),
+            state=SnapshotDbHandler._block_state_by_value_map(row[BlockRowDefs.STATE]),
             alloc_event_idx=row[BlockRowDefs.ALLOC_EVENT_ID],
             free_event_idx=row[BlockRowDefs.FREE_EVENT_ID]
         )
@@ -61,7 +68,7 @@ class TestSnapshotDbHandler:
     def build_trace_entry_by_row(row) -> TraceEntry:
         return TraceEntry(
             idx=row[EventRowDefs.ID],
-            action=TestSnapshotDbHandler._event_action_by_value_map(row[EventRowDefs.ACTION]),
+            action=SnapshotDbHandler._event_action_by_value_map(row[EventRowDefs.ACTION]),
             addr=row[EventRowDefs.ADDR],
             size=row[EventRowDefs.SIZE],
             stream=row[EventRowDefs.STREAM]
@@ -98,7 +105,6 @@ class TestSnapshotDbHandler:
                 seg = Segment.build_from_event(evt)
                 seg.blocks = list()
                 segments.insert(idx, seg)
-                # 从左向右合并
                 cur = idx - 1
                 while 0 <= cur < len(segments) - 1:
                     cur_seg = segments[cur]
@@ -109,7 +115,7 @@ class TestSnapshotDbHandler:
                     else:
                         break
             elif evt.action == 'segment_unmap':
-                exist_seg_idx = TestSnapshotDbHandler.find_segment_idx_by_addr(segments, evt.addr)
+                exist_seg_idx = SnapshotDbHandler.find_segment_idx_by_addr(segments, evt.addr)
                 exist_seg = segments[exist_seg_idx]
                 if evt.addr > exist_seg.address:
                     exist_seg_idx += 1
@@ -132,11 +138,11 @@ class TestSnapshotDbHandler:
     @staticmethod
     def build_segments(segments: List[Segment], blocks: List[Block]):
         for block in blocks:
-            exist_seg_idx = TestSnapshotDbHandler.find_segment_idx_by_addr(segments, block.address)
+            exist_seg_idx = SnapshotDbHandler.find_segment_idx_by_addr(segments, block.address)
             exist_seg = segments[exist_seg_idx]
             exist_seg.blocks.append(block)
             exist_seg.active_size += block.size
-            exist_seg.allocated_size += (block.size if block.state == BlockState.ACTIVE_ALLOCATED else 0)
+            exist_seg.allocated_size += (block.size if block.state == 'active_allocated' else 0)
         for seg in segments:
             seg.blocks.sort(key=lambda b: b.address)
 
@@ -150,7 +156,7 @@ class TestSnapshotDbHandler:
         cursor = self.conn.cursor()
         cursor.execute(query_events_sql, (event_id,))
         rows = cursor.fetchall()
-        return [TestSnapshotDbHandler.build_trace_entry_by_row(row) for row in rows]
+        return [SnapshotDbHandler.build_trace_entry_by_row(row) for row in rows]
 
     def query_blocks_by_event_id(self, event_id) -> List[Block]:
         query_block_sql = f"""
@@ -162,7 +168,7 @@ class TestSnapshotDbHandler:
         cursor = self.conn.cursor()
         cursor.execute(query_block_sql, (event_id, event_id))
         rows = cursor.fetchall()
-        return [TestSnapshotDbHandler.build_block_by_row(row) for row in rows]
+        return [SnapshotDbHandler.build_block_by_row(row) for row in rows]
 
     def get_segments_by_event_id(self, event_id: int):
         segment_events = self.query_segment_events_until(event_id)

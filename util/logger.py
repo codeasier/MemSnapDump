@@ -54,6 +54,18 @@ def set_global_log_file(log_file: str) -> None:
     _attach_file_handler_to_existing_loggers()
 
 
+def suppress_logs():
+    """Suppress INFO level logs during tests"""
+    for name in list(logging.Logger.manager.loggerDict.keys()):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
+def restore_logs():
+    """Restore log levels after tests"""
+    for name in list(logging.Logger.manager.loggerDict.keys()):
+        logging.getLogger(name).setLevel(logging.INFO)
+
+
 def _attach_file_handler_to_existing_loggers() -> None:
     """为所有已存在的 logger 添加文件处理器"""
     if _global_file_handler is None:
