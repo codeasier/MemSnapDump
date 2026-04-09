@@ -16,7 +16,7 @@ from ut.common import valid_segments
 
 test_data_dir = Path(__file__).parent.parent.resolve() / 'test-data'
 
-class TestReplayEventHooker(SimulateHooker):
+class ReplayEventHooker(SimulateHooker):
     def __init__(self, test_util, valid_interval: int = 100):
         self.test_util = test_util
         self.replay_count = 0
@@ -28,10 +28,11 @@ class TestReplayEventHooker(SimulateHooker):
     def post_undo_event(self, already_undo_event: TraceEntry, current_snapshot: DeviceSnapshot) -> bool:
         if self.replay_count % self.valid_interval == 0:
             valid_segments(current_snapshot.segments, self.test_util)
+        self.replay_count += 1
         return True
 
 
-class TestReplayBlockHooker(AllocatorHooker):
+class ReplayBlockHooker(AllocatorHooker):
     def __init__(self, test_util: unittest.TestCase):
         self.test_util = test_util
         self._segment = None
@@ -90,45 +91,45 @@ class TestSimulate(unittest.TestCase):
     def testBlockHookerInSnapshot(self):
         snapshot = TestSimulate.get_simulate_snapshot(self.snapshot_path)
         valid_segments(snapshot.device_snapshot.segments, self)
-        snapshot.register_allocator_hooker(TestReplayBlockHooker(self))
+        snapshot.register_allocator_hooker(ReplayBlockHooker(self))
         self.assertTrue(snapshot.replay())
 
     def testBlockHookerInVmemSnapshot(self):
         snapshot = TestSimulate.get_simulate_snapshot(self.vmem_snapshot_path)
         valid_segments(snapshot.device_snapshot.segments, self)
-        snapshot.register_allocator_hooker(TestReplayBlockHooker(self))
+        snapshot.register_allocator_hooker(ReplayBlockHooker(self))
         self.assertTrue(snapshot.replay())
 
     def testBlockHookerInSnapshotWithEmptyCache(self):
         snapshot = TestSimulate.get_simulate_snapshot(self.snapshot_with_empty_cache_path)
         valid_segments(snapshot.device_snapshot.segments, self)
-        snapshot.register_allocator_hooker(TestReplayBlockHooker(self))
+        snapshot.register_allocator_hooker(ReplayBlockHooker(self))
         self.assertTrue(snapshot.replay())
 
     def testBlockHookerInVmemSnapshotWithEmptyCache(self):
         snapshot = TestSimulate.get_simulate_snapshot(self.vmem_snapshot_with_empty_cache_path)
         valid_segments(snapshot.device_snapshot.segments, self)
-        snapshot.register_allocator_hooker(TestReplayBlockHooker(self))
+        snapshot.register_allocator_hooker(ReplayBlockHooker(self))
         self.assertTrue(snapshot.replay())
 
     def testReplaySnapshot(self):
         snapshot = TestSimulate.get_simulate_snapshot(self.snapshot_path)
-        snapshot.register_hooker(TestReplayEventHooker(self))
+        snapshot.register_hooker(ReplayEventHooker(self))
         self.assertTrue(snapshot.replay())
 
     def testReplayVmemSnapshot(self):
         snapshot = TestSimulate.get_simulate_snapshot(self.vmem_snapshot_path)
-        snapshot.register_hooker(TestReplayEventHooker(self))
+        snapshot.register_hooker(ReplayEventHooker(self))
         self.assertTrue(snapshot.replay())
 
     def testReplaySnapshotWithEmptyCache(self):
         snapshot = TestSimulate.get_simulate_snapshot(self.snapshot_with_empty_cache_path)
-        snapshot.register_hooker(TestReplayEventHooker(self))
+        snapshot.register_hooker(ReplayEventHooker(self))
         self.assertTrue(snapshot.replay())
 
     def testReplayVmemSnapshotWithEmptyCache(self):
         snapshot = TestSimulate.get_simulate_snapshot(self.vmem_snapshot_with_empty_cache_path)
-        snapshot.register_hooker(TestReplayEventHooker(self))
+        snapshot.register_hooker(ReplayEventHooker(self))
         self.assertTrue(snapshot.replay())
 
 

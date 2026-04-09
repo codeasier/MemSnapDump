@@ -10,7 +10,6 @@ from base import Segment, BlockState
 def valid_segment(segment: Segment, test_util: unittest.TestCase):
     test_util.assertGreaterEqual(segment.active_size, segment.allocated_size)
     test_util.assertGreaterEqual(segment.total_size, segment.active_size)
-    addr_offset = segment.address
     allocated = 0
     activated = 0
     for block in segment.blocks:
@@ -19,10 +18,7 @@ def valid_segment(segment: Segment, test_util: unittest.TestCase):
             activated += block.size
             if block.state == BlockState.ACTIVE_ALLOCATED:
                 allocated += block.size
-        test_util.assertEqual(block.address, addr_offset)
         test_util.assertEqual(block.segment_ptr, segment)
-        addr_offset += block.size
-    test_util.assertEqual(segment.address + segment.total_size, addr_offset)
     test_util.assertEqual(allocated, segment.allocated_size)
     test_util.assertEqual(activated, segment.active_size)
 

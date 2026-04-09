@@ -25,7 +25,7 @@ class SimulateDeviceSnapshot:
         if not snapshot_dict:
             raise RuntimeError("Cannot init snapshot from empty data.")
         self._loading_logger.info(f"Loading snapshot data...")
-        self.device_snapshot = DeviceSnapshot.from_dict(snapshot_dict, device)
+        self.device_snapshot = DeviceSnapshot.from_dict(snapshot_dict, device, ignore_inactive_blocks=True)
         self._loading_logger.info(f"Finished to load snapshot data: total of {len(self.device_snapshot.trace_entries)} "
                             f"entries and {len(self.device_snapshot.segments)} segments.")
         self.hookers = dict[int, SimulateHooker]()

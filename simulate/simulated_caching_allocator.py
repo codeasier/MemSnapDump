@@ -1,7 +1,5 @@
-import math
 import copy
 import bisect
-from dataclasses import dataclass
 from typing import Dict, Tuple, Optional, List
 
 from base import DeviceSnapshot, BlockState, Block, Segment, TraceEntry
@@ -12,16 +10,9 @@ from .hooker_defs import AllocatorHooker
 allocator_logger = get_logger("ALLOCATOR")
 
 
-@dataclass
-class BlockLoc:
-    seg_idx: int = -1
-    block_idx: int = -1
-
-
 class AllocatorContext:
-    def __init__(self, snapshot: DeviceSnapshot, block_align_size: int = 512):
+    def __init__(self, snapshot: DeviceSnapshot):
         self.device_snapshot = snapshot
-        self.block_align_size = block_align_size
         self.current_undo_event: TraceEntry = None
         self.workspace_flag = False
 
@@ -49,23 +40,28 @@ class SimulatedCachingAllocator:
         :param new_block: 待分配的block
         """
         _error = "Failed to simulate alloc block"
-        # 新块对齐拆分重置大小
-        new_block.size = self._get_aligned_size(new_block.requested_size)
-        # 设置block的释放事件, 仿真内存分配器在alloc_block时实质对应的是回放到了内存释放事件，所以此处是设置释放事件id而不是分配事件id
+        gap_result = self.find_gap_for_alloc_block(new_block.address, new_block.size)
+        if gap_result is None:
+            allocator_logger.error(f"{_error}: cannot find gap for block (addr={new_block.address}, size={new_block.size})")
+            return False
+        segment, insert_idx = gap_result
         if self.ctx.current_undo_event:
             new_block.free_event_idx = self.ctx.current_undo_event.idx
-        # 查找block分片位置
-        reusable_block_loc = self._find_reusable_inactive_block(new_block)
-        if reusable_block_loc.seg_idx == -1 or reusable_block_loc.block_idx == -1:
-            allocator_logger.error(f"{_error}: cannot find usable segment or reusable block.")
-            return False
+        if self.ctx.current_undo_event and self.ctx.current_undo_event.action == 'free_completed':
+            new_block.state = BlockState.ACTIVE_PENDING_FREE
+        else:
+            new_block.state = BlockState.ACTIVE_ALLOCATED
+        new_block.segment_ptr = segment
         for hooker in self.hookers.values():
             hooker.pre_replay_alloc_block(new_block, self.ctx.device_snapshot)
-        # 执行分配
-        if not self._do_alloc_block(new_block, reusable_block_loc):
-            return False
+        blocks = segment.blocks
+        blocks.insert(insert_idx, new_block)
+        segment.active_size += new_block.size
+        self.ctx.device_snapshot.total_activated += new_block.size
+        if new_block.state == BlockState.ACTIVE_ALLOCATED:
+            segment.allocated_size += new_block.size
+            self.ctx.device_snapshot.total_allocated += new_block.size
         for hooker in self.hookers.values():
-            # new_block对象可能并不会被插入到内存池中（如已有完整内存块对象可复用，或拆解后使用原block缩小规模的形式）
             hooker.post_replay_alloc_block(new_block, self.ctx.device_snapshot)
         return True
 
@@ -75,20 +71,35 @@ class SimulatedCachingAllocator:
         :param alloc_event: 待回滚的alloc事件
         """
         _error = "Failed to simulate free block"
-        free_block_loc = self._find_active_block(alloc_event.addr, alloc_event.size)
-        if free_block_loc.seg_idx == -1 or free_block_loc.block_idx == -1:
-            allocator_logger.error(f"{_error}: cannot find exist segment or active block.")
+        seg_idx = self.ctx.device_snapshot.find_segment_idx_by_addr(alloc_event.addr)
+        if seg_idx == -1:
+            allocator_logger.error(f"{_error}: cannot find segment for block (addr={alloc_event.addr})")
             return False
-        exist_block = self._get_block_by_loc(free_block_loc)
+        exist_block = self.find_block_by_addr(seg_idx, alloc_event.addr)
         if exist_block is None:
+            # workspace场景容忍
+            if self.ctx.workspace_flag:
+                allocator_logger.warning(f"{_error}: cannot find block (addr={alloc_event.addr}), workspace scenario tolerance")
+                return True
+            allocator_logger.error(f"{_error}: cannot find block (addr={alloc_event.addr})")
             return False
-        # 设置block的分配事件, 仿真内存分配器在free_block时实质对应的是回放到了内存分配事件，所以此处是设置分配事件id而不是释放事件id
+        if exist_block.size < alloc_event.size:
+            allocator_logger.error(f"{_error}: block size ({exist_block.size}) < event size ({alloc_event.size})")
+            return False
         exist_block.alloc_event_idx = alloc_event.idx
         exist_block_copy = copy.copy(exist_block)
         for hooker in self.hookers.values():
             hooker.pre_replay_free_block(exist_block, self.ctx.device_snapshot)
-        if not self._do_free_block(free_block_loc):
+        segment = exist_block.segment_ptr
+        if segment is None:
+            allocator_logger.error(f"{_error}: block has no segment_ptr")
             return False
+        segment.active_size -= exist_block.size
+        self.ctx.device_snapshot.total_activated -= exist_block.size
+        if exist_block.state == BlockState.ACTIVE_ALLOCATED:
+            segment.allocated_size -= exist_block.size
+            self.ctx.device_snapshot.total_allocated -= exist_block.size
+        segment.blocks.remove(exist_block)
         for hooker in self.hookers.values():
             hooker.post_replay_free_block(exist_block_copy, self.ctx.device_snapshot)
         return True
@@ -99,11 +110,24 @@ class SimulatedCachingAllocator:
         :param free_requested_event: 待回放的free_requested请求
         """
         _error = "Failed to simulate active block"
-        active_pending_free_block_loc = self._find_active_block(free_requested_event.addr, free_requested_event.size)
-        active_pending_free_block = self._get_block_by_loc(active_pending_free_block_loc)
-        if active_pending_free_block is None or active_pending_free_block.state != BlockState.ACTIVE_PENDING_FREE:
-            allocator_logger.error(f"{_error}: cannot find the block or is not in {BlockState.ACTIVE_PENDING_FREE} "
-                                   f"state.")
+        seg_idx = self.ctx.device_snapshot.find_segment_idx_by_addr(free_requested_event.addr)
+        if seg_idx == -1:
+            allocator_logger.error(f"{_error}: cannot find segment for block (addr={free_requested_event.addr})")
+            return False
+        active_pending_free_block = self.find_block_by_addr(seg_idx, free_requested_event.addr)
+        if active_pending_free_block is None:
+            allocator_logger.error(f"{_error}: cannot find block (addr={free_requested_event.addr})")
+            return False
+        if active_pending_free_block.state != BlockState.ACTIVE_PENDING_FREE:
+            # workspace场景容忍异常
+            if self.ctx.workspace_flag:
+                allocator_logger.warning(
+                    f"{_error}: block (addr={free_requested_event.addr}) is not in {BlockState.ACTIVE_PENDING_FREE} state, "
+                    f"but workspace_flag is True, skipping")
+                return True
+            allocator_logger.error(
+                f"{_error}: block (addr={free_requested_event.addr}) is not in {BlockState.ACTIVE_PENDING_FREE} state, "
+                f"current state: {active_pending_free_block.state}")
             return False
         if active_pending_free_block.segment_ptr is None:
             allocator_logger.error(f"{_error}: the found active pending block's segment is none.")
@@ -119,23 +143,56 @@ class SimulatedCachingAllocator:
         :param new_segment: 新内存段
         :param merge: 是否合并，map时对应虚拟内存场景，否则仅为alloc
         """
+        _error = "Failed to alloc or map segment"
         segments = self.ctx.device_snapshot.segments
-        idx = bisect.bisect_left([seg.address for seg in segments], new_segment.address)
         for hooker in self.hookers.values():
             hooker.pre_replay_map_or_alloc_segment(new_segment, self.ctx.device_snapshot)
-        segments.insert(idx, new_segment)
-        self.ctx.device_snapshot.total_reserved += new_segment.total_size
-        # 设置seg的释放事件, 仿真内存分配器在alloc/map segment时实质对应的是回放到了free/unmap事件，所以此处是设置释放事件id而不是分配事件id
         if self.ctx.current_undo_event:
             new_segment.free_or_unmap_event_idx = self.ctx.current_undo_event.idx
         if not merge:
+            self.insert_segment_sorted(new_segment)
+            self.ctx.device_snapshot.total_reserved += new_segment.total_size
+            for hooker in self.hookers.values():
+                hooker.post_replay_map_or_alloc_segment(new_segment, self.ctx.device_snapshot)
+            return True
+        new_seg_start = new_segment.address
+        new_seg_end = new_seg_start + new_segment.total_size
+        left_adjacent_idx = -1
+        right_adjacent_idx = -1
+        for i, seg in enumerate(segments):
+            if seg.stream != new_segment.stream:
+                continue
+            if seg.address + seg.total_size == new_seg_start:
+                left_adjacent_idx = i
+            elif new_seg_end == seg.address:
+                right_adjacent_idx = i
+        if left_adjacent_idx == -1 and right_adjacent_idx == -1:
+            self.insert_segment_sorted(new_segment)
+            self.ctx.device_snapshot.total_reserved += new_segment.total_size
             for hooker in self.hookers.values():
                 hooker.post_replay_map_or_alloc_segment(new_segment, self.ctx.device_snapshot)
             return True
         virtual_map_segment = copy.deepcopy(new_segment)
-        # 尝试从前一个segment尽可能多的向后合并
-        start_merge_idx = idx - 1 if idx > 0 else idx
-        self._merge_consecutive_segments(start_merge_idx)
+        if left_adjacent_idx != -1:
+            left_seg = segments[left_adjacent_idx]
+            left_seg.total_size += new_segment.total_size
+            left_seg.allocated_size += new_segment.allocated_size
+            left_seg.active_size += new_segment.active_size
+            for block in new_segment.blocks:
+                block.segment_ptr = left_seg
+                left_seg.blocks.append(block)
+            new_segment = left_seg
+            if right_adjacent_idx != -1:
+                if not self.merge_segments(left_adjacent_idx, right_adjacent_idx):
+                    allocator_logger.error(f"{_error}: failed to merge right segment")
+                    return False
+        else:
+            self.insert_segment_sorted(new_segment)
+            new_idx = segments.index(new_segment)
+            if not self.merge_segments(new_idx, right_adjacent_idx if right_adjacent_idx > new_idx else right_adjacent_idx + 1):
+                allocator_logger.error(f"{_error}: failed to merge right segment")
+                return False
+        self.ctx.device_snapshot.total_reserved += virtual_map_segment.total_size
         for hooker in self.hookers.values():
             hooker.post_replay_map_or_alloc_segment(virtual_map_segment, self.ctx.device_snapshot)
         return True
@@ -147,12 +204,11 @@ class SimulatedCachingAllocator:
         """
         _error = "Free segment failed"
         seg_addr = alloc_seg_event.addr
-        idx = self.ctx.device_snapshot.find_segment_idx_by_addr(seg_addr)
-        if idx < 0 or idx >= len(self.ctx.device_snapshot.segments):
-            allocator_logger.error(f"{_error}: cannot found segment(addr={seg_addr})")
+        exist_seg = self.find_segment_by_exact_addr(seg_addr, alloc_seg_event.stream)
+        if exist_seg is None:
+            allocator_logger.error(f"{_error}: cannot found segment(addr={seg_addr}, stream={alloc_seg_event.stream})")
             return False
-        exist_seg = self.ctx.device_snapshot.segments[idx]
-        if exist_seg.address != seg_addr or exist_seg.total_size != alloc_seg_event.size:
+        if exist_seg.total_size != alloc_seg_event.size:
             allocator_logger.error(f"{_error}: cannot free segment(addr={seg_addr}, size={alloc_seg_event.size}) in "
                                    f"exist segment(addr={exist_seg.address}, size={exist_seg.total_size})")
             return False
@@ -164,7 +220,7 @@ class SimulatedCachingAllocator:
         for hooker in self.hookers.values():
             hooker.pre_replay_unmap_or_free_segment(exist_seg, self.ctx.device_snapshot)
         self.ctx.device_snapshot.total_reserved -= exist_seg.total_size
-        del self.ctx.device_snapshot.segments[idx]
+        self.ctx.device_snapshot.segments.remove(exist_seg)
         for hooker in self.hookers.values():
             hooker.post_replay_unmap_or_free_segment(exist_seg, self.ctx.device_snapshot)
         return True
@@ -193,383 +249,254 @@ class SimulatedCachingAllocator:
             return False
         for hooker in self.hookers.values():
             hooker.pre_replay_unmap_or_free_segment(virtual_free_segment, self.ctx.device_snapshot)
-        if not self._do_unmap_segment(virtual_free_segment, exist_seg_idx):
+        seg_start = exist_seg.address
+        seg_end = seg_start + exist_seg.total_size
+        unmap_end = seg_addr + unmap_size
+        if exist_seg.stream != map_event.stream:
+            allocator_logger.error(f"{_error}: stream mismatch (segment: {exist_seg.stream}, event: {map_event.stream})")
             return False
+        if seg_addr == seg_start:
+            if not self.shrink_segment(exist_seg_idx, seg_addr, unmap_size, 'left'):
+                allocator_logger.error(f"{_error}: failed to shrink segment from left")
+                return False
+        elif unmap_end == seg_end:
+            if not self.shrink_segment(exist_seg_idx, seg_addr, unmap_size, 'right'):
+                allocator_logger.error(f"{_error}: failed to shrink segment from right")
+                return False
+        else:
+            if not self.split_segment_at(exist_seg_idx, seg_addr, unmap_size):
+                allocator_logger.error(f"{_error}: failed to split segment")
+                return False
+        self.ctx.device_snapshot.total_reserved -= unmap_size
         for hooker in self.hookers.values():
             hooker.post_replay_unmap_or_free_segment(virtual_free_segment, self.ctx.device_snapshot)
         return True
 
-    def _get_aligned_size(self, requested_size: int):
-        # 为算子末尾预留32字节，并按照align_size对齐
-        return math.ceil((requested_size + 32) / self.ctx.block_align_size) * self.ctx.block_align_size
+    def find_segment_by_exact_addr(self, addr: int, stream: int) -> Optional[Segment]:
+        for segment in self.ctx.device_snapshot.segments:
+            if segment.address == addr and segment.stream == stream:
+                return segment
+        return None
 
-    def _find_reusable_inactive_block(self, block: Block) -> BlockLoc:
-        """
-            在缓存池中查找可用于分配的segment及block
-        :param block: 待分配block
-        :return: 可用于分配block的"坐标"
-        """
-        _error = "Failed to find reusable inactive block"
-        seg_idx = self.ctx.device_snapshot.find_segment_idx_by_addr(block.address)
+    def find_block_by_addr(self, seg_idx: int, block_addr: int) -> Optional[Block]:
+        if seg_idx < 0 or seg_idx >= len(self.ctx.device_snapshot.segments):
+            return None
+        segment = self.ctx.device_snapshot.segments[seg_idx]
+        blocks = segment.blocks
+        left, right = 0, len(blocks) - 1
+        while left <= right:
+            mid = (left + right) // 2
+            if blocks[mid].address == block_addr:
+                return blocks[mid]
+            elif blocks[mid].address < block_addr:
+                left = mid + 1
+            else:
+                right = mid - 1
+        return None
+
+    def find_gap_for_alloc_block(self, event_addr: int, event_size: int) -> Optional[Tuple[Segment, int]]:
+        seg_idx = self.ctx.device_snapshot.find_segment_idx_by_addr(event_addr)
         if seg_idx == -1:
-            allocator_logger.error(f"{_error}: cannot found the segment to which the block belongs, {block.to_dict()}")
-            return BlockLoc()
-        exist_segment = self.ctx.device_snapshot.segments[seg_idx]
-        reusable_inactive_block_idx = exist_segment.find_block_idx_by_block_addr(block.address)
-        exist_block = exist_segment.blocks[reusable_inactive_block_idx]
-        if exist_block.state != BlockState.INACTIVE:
-            allocator_logger.error(f"{_error}: cannot reuse block which is not inactive, {exist_block.to_dict()}")
-            return BlockLoc(seg_idx, -1)
-        if not exist_block.valid_sub_block(block.address, block.size):
-            allocator_logger.error(f"{_error}: an abnormal block was found whose address is higher than the "
-                                   f"existing block's offset address: {block.to_dict()}")
-            return BlockLoc(seg_idx, -1)
-        return BlockLoc(seg_idx, reusable_inactive_block_idx)
-
-    def _find_active_block(self, block_addr: int, block_size: int) -> BlockLoc:
-        _error = "Failed to find active block"
-        exist_seg_idx = self.ctx.device_snapshot.find_segment_idx_by_addr(block_addr)
-        if exist_seg_idx == -1:
-            allocator_logger.error(f"{_error}: cannot found the segment to which the active block belongs,"
-                                   f" {block_addr}")
-            return BlockLoc(-1, -1)
-        exist_segment = self.ctx.device_snapshot.segments[exist_seg_idx]
-        exist_block_idx = bisect.bisect_left([_block.address for _block in exist_segment.blocks], block_addr)
-        exist_block = exist_segment.blocks[exist_block_idx]
-        if exist_block.address != block_addr:
-            allocator_logger.error(f"{_error}: cannot found block (addr={block_addr}, size={block_size}) "
-                                   f"in segment {exist_segment.to_dict()}")
-            return BlockLoc(exist_seg_idx, -1)
-        if (self._get_aligned_size(exist_block.requested_size) != self._get_aligned_size(block_size) and
-                exist_block.size != block_size):
-            allocator_logger.warning(
-                f"Something unexpected occurred during find active block: found a block{exist_block} "
-                f"with the same address but a different size(expected_size={block_size}, "
-                f"aligned_expected_size={self._get_aligned_size(block_size)})")
-        if exist_block.state == BlockState.INACTIVE:
-            # 昇腾torch-npu场景下由于workspace事件存在，需要特殊处理
-            if self.ctx.workspace_flag:
-                allocator_logger.warning(
-                    f"Something unexpected occurred during find active block: found a block{exist_block} "
-                    f"with the same address but is in inactive state.")
-                return BlockLoc(exist_seg_idx, exist_block_idx)
-            allocator_logger.error(f"{_error}: the block (addr = {block_addr}) is not an active block")
-            return BlockLoc(exist_seg_idx, -1)
-        return BlockLoc(exist_seg_idx, exist_block_idx)
-
-    def _get_block_by_loc(self, block_loc: BlockLoc) -> Optional[Block]:
-        _error = "Failed to get block by location"
-        if block_loc.seg_idx < 0 or block_loc.seg_idx >= len(self.ctx.device_snapshot.segments):
-            allocator_logger.error(f"{_error}: invalid segment idx")
             return None
-        exist_segment = self.ctx.device_snapshot.segments[block_loc.seg_idx]
-        if block_loc.block_idx < 0 or block_loc.block_idx >= len(exist_segment.blocks):
-            allocator_logger.error(f"{_error}: invalid block idx")
+        segment = self.ctx.device_snapshot.segments[seg_idx]
+        blocks = segment.blocks
+        event_end = event_addr + event_size
+        seg_start = segment.address
+        seg_end = seg_start + segment.total_size
+        if len(blocks) == 0:
+            if seg_start <= event_addr and event_end <= seg_end:
+                return segment, 0
             return None
-        return exist_segment.blocks[block_loc.block_idx]
+        
+        if blocks[0].address >= event_end:
+            if seg_start <= event_addr:
+                return segment, 0
+            return None
+        
+        left, right = 0, len(blocks) - 1
+        while left < right:
+            mid = (left + right + 1) // 2
+            if blocks[mid].address <= event_addr:
+                left = mid
+            else:
+                right = mid - 1
+        
+        gap_start = blocks[left].address + blocks[left].size
+        if left + 1 < len(blocks):
+            gap_end = blocks[left + 1].address
+            if gap_start <= event_addr and event_end <= gap_end:
+                return segment, left + 1
+        else:
+            if gap_start <= event_addr and event_end <= seg_end:
+                return segment, len(blocks)
+        
+        return None
 
-    def _insert_block_into_segment(self, segment: Segment, new_block: Block, insert_idx: int):
-        segment.blocks.insert(insert_idx, new_block)
-        if new_block.state != BlockState.INACTIVE:
-            segment.active_size += new_block.size
-            self.ctx.device_snapshot.total_activated += new_block.size
-            if new_block.state == BlockState.ACTIVE_ALLOCATED:
-                segment.allocated_size += new_block.size
-                self.ctx.device_snapshot.total_allocated += new_block.size
+    def insert_segment_sorted(self, segment: Segment):
+        segments = self.ctx.device_snapshot.segments
+        idx = bisect.bisect_left([seg.address for seg in segments], segment.address)
+        segments.insert(idx, segment)
 
-    def _split_exist_inactive_block(self, block_loc: BlockLoc, slices: list) -> bool:
-        """
-            将现有的inactive大块拆分为多个小块。原block将被缩小为第一个块，剩余的块会新建
-        :param block_loc: 坐标
-        :param slices: 待拆分的大小分片，如[2, 4]代表拆成两个大小为2和4的块
-        """
-        _error = "Failed to split block"
-        exist_segment = self.ctx.device_snapshot.segments[block_loc.seg_idx]
-        original_block = exist_segment.blocks[block_loc.block_idx]
-        if sum(slices) != original_block.size:
-            allocator_logger.error(f"{_error}: the expected total size of the slices does not match the size of the "
-                                   f"exist block.")
+    def split_segment_at(self, seg_idx: int, cut_addr: int, cut_size: int) -> bool:
+        _error = "Failed to split segment"
+        segments = self.ctx.device_snapshot.segments
+        if seg_idx < 0 or seg_idx >= len(segments):
+            allocator_logger.error(f"{_error}: invalid segment index {seg_idx}")
             return False
-        # 1. 缩小原block
-        original_block.size = slices[0]
-        # 2. 拆分剩下的block
-        current_idx = block_loc.block_idx
-        offset_addr = original_block.address + original_block.size
-        for new_block_size in slices[1:]:
-            current_idx += 1
-            new_block = Block(
-                size=new_block_size,
-                requested_size=new_block_size,
-                address=offset_addr,
-                state=BlockState.INACTIVE,
-                segment_ptr=exist_segment
-            )
-            self._insert_block_into_segment(exist_segment, new_block, current_idx)
-            offset_addr += new_block_size
+        original_segment = segments[seg_idx]
+        seg_start = original_segment.address
+        seg_end = seg_start + original_segment.total_size
+        cut_end = cut_addr + cut_size
+        if cut_addr < seg_start or cut_end > seg_end:
+            allocator_logger.error(f"{_error}: cut range [{cut_addr}, {cut_end}) is outside segment [{seg_start}, {seg_end})")
+            return False
+        if cut_addr == seg_start and cut_end == seg_end:
+            allocator_logger.warning(f"Split Seg: cut range covers entire segment, nothing to split, just remove it")
+            del self.ctx.device_snapshot.segments[seg_idx]
+            return True
+        left_segment = Segment(
+            address=seg_start,
+            total_size=cut_addr - seg_start,
+            stream=original_segment.stream,
+            segment_type=original_segment.segment_type,
+            allocated_size=0,
+            active_size=0,
+            blocks=[],
+            device=original_segment.device,
+            frames=original_segment.frames,
+            is_expandable=original_segment.is_expandable,
+            free_or_unmap_event_idx=original_segment.free_or_unmap_event_idx,
+            alloc_or_map_event_idx=original_segment.alloc_or_map_event_idx
+        )
+        right_segment = Segment(
+            address=cut_end,
+            total_size=seg_end - cut_end,
+            stream=original_segment.stream,
+            segment_type=original_segment.segment_type,
+            allocated_size=0,
+            active_size=0,
+            blocks=[],
+            device=original_segment.device,
+            frames=original_segment.frames,
+            is_expandable=original_segment.is_expandable,
+            free_or_unmap_event_idx=original_segment.free_or_unmap_event_idx,
+            alloc_or_map_event_idx=original_segment.alloc_or_map_event_idx
+        )
+        for block in original_segment.blocks:
+            block_start = block.address
+            block_end = block_start + block.size
+            if block_end <= cut_addr:
+                block.segment_ptr = left_segment
+                left_segment.blocks.append(block)
+                left_segment.active_size += block.size
+                if block.state == BlockState.ACTIVE_ALLOCATED:
+                    left_segment.allocated_size += block.size
+            elif block_start >= cut_end:
+                block.segment_ptr = right_segment
+                right_segment.blocks.append(block)
+                right_segment.active_size += block.size
+                if block.state == BlockState.ACTIVE_ALLOCATED:
+                    right_segment.allocated_size += block.size
+            else:
+                allocator_logger.warning(f"{_error}: active block [{block_start}, {block_end}) overlaps with cut range [{cut_addr}, {cut_end}), just drop it.")
+        del segments[seg_idx]
+        if left_segment.total_size > 0:
+            self.insert_segment_sorted(left_segment)
+        if right_segment.total_size > 0:
+            self.insert_segment_sorted(right_segment)
         return True
 
-    def _put_new_block_into_segment_block(self, origin_block: Block, new_block: Block):
-        origin_block.requested_size = new_block.requested_size
-        origin_block.frames = new_block.frames
-        origin_block.state = new_block.state
-        origin_block.free_event_idx = new_block.free_event_idx
-        origin_block.alloc_event_idx = new_block.alloc_event_idx
-        if new_block.state != BlockState.INACTIVE:
-            origin_block.segment_ptr.active_size += new_block.size
-            self.ctx.device_snapshot.total_activated += new_block.size
-            if new_block.state == BlockState.ACTIVE_ALLOCATED:
-                origin_block.segment_ptr.allocated_size += new_block.size
-                self.ctx.device_snapshot.total_allocated += new_block.size
-
-    def _split_exist_segment(self, origin_seg_idx: int, slices: list) -> bool:
-        """
-            将已有segment拆分成多个分段，需要完成：
-            1. 根据slices总数和大小切分
-            2. 切分后，需要重整segment
-        :param origin_seg_idx:
-        :param slices:
-        :return:
-        """
-        _error = "Failed to split exist segment"
-        origin_segment = self.ctx.device_snapshot.segments[origin_seg_idx]
-        if sum(slices) != origin_segment.total_size:
-            allocator_logger.error(f"{_error}: the expected total size of the slices does not match the size of the "
-                                   f"origin segment.")
+    def shrink_segment(self, seg_idx: int, shrink_addr: int, shrink_size: int, direction: str) -> bool:
+        _error = "Failed to shrink segment"
+        segments = self.ctx.device_snapshot.segments
+        if seg_idx < 0 or seg_idx >= len(segments):
+            allocator_logger.error(f"{_error}: invalid segment index {seg_idx}")
             return False
-        # 1. 缩小原内存段, 并进行重整
-        origin_segment.total_size = slices[0]
-        origin_blocks = origin_segment.blocks
-        origin_segment.blocks = list()
-        if not self._reorganize_segment(origin_segment, origin_blocks):
+        if direction not in ['left', 'right']:
+            allocator_logger.error(f"{_error}: invalid direction '{direction}', must be 'left' or 'right'")
             return False
-        # 2. 实施拆分
-        current_idx = origin_seg_idx
-        offset_addr = origin_segment.address + origin_segment.total_size
-        for new_seg_size in slices[1:]:
-            current_idx += 1
-            new_seg = Segment(
-                address=offset_addr,
-                total_size=new_seg_size,
-                stream=origin_segment.stream,
-                blocks=list(),
-                device=origin_segment.device,
-                frames=origin_segment.frames,
-                is_expandable=True,
-                free_or_unmap_event_idx=origin_segment.free_or_unmap_event_idx,
-                alloc_or_map_event_idx=origin_segment.alloc_or_map_event_idx
-            )
-            if not self._reorganize_segment(new_seg, origin_blocks):
+        segment = segments[seg_idx]
+        seg_start = segment.address
+        seg_end = seg_start + segment.total_size
+        shrink_end = shrink_addr + shrink_size
+        if direction == 'left':
+            if shrink_addr < seg_start or shrink_end > seg_end:
+                allocator_logger.error(f"{_error}: shrink range [{shrink_addr}, {shrink_end}) is outside segment [{seg_start}, {seg_end})")
                 return False
-            self.ctx.device_snapshot.segments.insert(current_idx, new_seg)
-            offset_addr += new_seg_size
+            new_start = shrink_end
+            new_size = seg_end - new_start
+            if new_size < 0:
+                allocator_logger.error(f"{_error}: shrink results in negative segment size")
+                return False
+            for block in segment.blocks:
+                block_start = block.address
+                block_end = block_start + block.size
+                if block_end <= shrink_end:
+                    allocator_logger.error(f"{_error}: active block [{block_start}, {block_end}) in shrink range [{shrink_addr}, {shrink_end})")
+                    return False
+            segment.address = new_start
+            segment.total_size = new_size
+            new_blocks = []
+            for block in segment.blocks:
+                if block.address >= new_start:
+                    new_blocks.append(block)
+            segment.blocks = new_blocks
+        else:
+            if shrink_addr < seg_start or shrink_end > seg_end:
+                allocator_logger.error(f"{_error}: shrink range [{shrink_addr}, {shrink_end}) is outside segment [{seg_start}, {seg_end})")
+                return False
+            new_size = shrink_addr - seg_start
+            if new_size < 0:
+                allocator_logger.error(f"{_error}: shrink results in negative segment size")
+                return False
+            for block in segment.blocks:
+                block_start = block.address
+                block_end = block_start + block.size
+                if block_start >= shrink_addr:
+                    allocator_logger.error(f"{_error}: active block [{block_start}, {block_end}) in shrink range [{shrink_addr}, {shrink_end})")
+                    return False
+            new_blocks = []
+            for block in segment.blocks:
+                if block.address + block.size <= shrink_addr:
+                    new_blocks.append(block)
+            segment.blocks = new_blocks
+            segment.total_size = new_size
+        segment.allocated_size = sum(b.size for b in segment.blocks if b.state == BlockState.ACTIVE_ALLOCATED)
+        segment.active_size = sum(b.size for b in segment.blocks)
+        if segment.total_size == 0:
+            del segments[seg_idx]
         return True
 
-    @staticmethod
-    def merge_segments(target: Segment, source: Segment):
+    def merge_segments(self, target_idx: int, source_idx: int) -> bool:
+        _error = "Failed to merge segments"
+        segments = self.ctx.device_snapshot.segments
+        if target_idx < 0 or target_idx >= len(segments):
+            allocator_logger.error(f"{_error}: invalid target segment index {target_idx}")
+            return False
+        if source_idx < 0 or source_idx >= len(segments):
+            allocator_logger.error(f"{_error}: invalid source segment index {source_idx}")
+            return False
+        if target_idx == source_idx:
+            allocator_logger.error(f"{_error}: target and source are the same segment")
+            return False
+        target = segments[target_idx]
+        source = segments[source_idx]
+        if target.stream != source.stream:
+            allocator_logger.error(f"{_error}: segments have different streams (target: {target.stream}, source: {source.stream})")
+            return False
+        are_adjacent = (target.address + target.total_size == source.address or 
+                       source.address + source.total_size == target.address)
+        if not are_adjacent:
+            allocator_logger.error(f"{_error}: segments are not adjacent (target: [{target.address}, {target.address + target.total_size}), source: [{source.address}, {source.address + source.total_size}))")
+            return False
+        if target.address > source.address:
+            target, source = source, target
+            target_idx, source_idx = source_idx, target_idx
         target.total_size += source.total_size
         target.allocated_size += source.allocated_size
         target.active_size += source.active_size
-        target_tail_block = target.blocks[-1]
-        source_head_block = source.blocks[0]
-        # 如果source的第一个block与target最后一个block同为inactive，则需要进行合并
-        if target_tail_block.state == BlockState.INACTIVE and source_head_block.state == BlockState.INACTIVE:
-            target_tail_block.size += source_head_block.size
-            del source.blocks[0]
         for block in source.blocks:
             block.segment_ptr = target
             target.blocks.append(block)
-
-    def _drop_exist_segment(self, exist_seg_idx: int) -> bool:
-        """
-            摘除一个segment
-        :param exist_seg_idx: 索引
-        :return:
-        """
-        _error = "Failed to drop exist segment"
-        exist_seg = self.ctx.device_snapshot.segments[exist_seg_idx]
-        if exist_seg.active_size > 0:
-            allocator_logger.error(f"{_error}: cannot drop a segment that still has active allocations.")
-            return False
-        del self.ctx.device_snapshot.segments[exist_seg_idx]
+        del segments[source_idx]
         return True
-
-    def _merge_consecutive_segments(self, start_merge_idx: int):
-        segments = self.ctx.device_snapshot.segments
-        while start_merge_idx + 1 < len(segments):
-            cur_seg = segments[start_merge_idx]
-            next_seg = segments[start_merge_idx + 1]
-            # 如相同流且 当前seg的尾与next_seg头相接
-            if cur_seg.stream == next_seg.stream and cur_seg.address + cur_seg.total_size == next_seg.address:
-                SimulatedCachingAllocator.merge_segments(cur_seg, next_seg)
-                del segments[start_merge_idx + 1]
-            else:
-                start_merge_idx += 1
-
-    def _reorganize_segment(self, segment: Segment, origin_blocks: List[Block]) -> bool:
-        """
-            根据blocks、total_size重新整理内存段
-        :param segment: 待重新整理的内存段
-        :return: 是否成功
-        """
-        err = "Reorganize segment blocks failed"
-        seg_addr_end = segment.address + segment.total_size
-        segment.allocated_size = 0
-        segment.active_size = 0
-        # 仅摘取内部块
-        pick_idx = 0
-        while origin_blocks and pick_idx < len(origin_blocks) and origin_blocks[pick_idx].address < seg_addr_end:
-            cur_block = origin_blocks[pick_idx]
-            cur_block_addr_end = cur_block.address + cur_block.size
-            # 完全无交集
-            if cur_block_addr_end <= segment.address:
-                pick_idx += 1
-                continue
-            # 正常内部block，摘取
-            if segment.address <= cur_block.address and cur_block_addr_end <= seg_addr_end:
-                cur_block.segment_ptr = segment
-                segment.blocks.append(cur_block)
-                del origin_blocks[pick_idx]
-                continue
-            # 有交集，则可以判断一下是否为inactive，如果是非inactive说明有异常，不可切分
-            if cur_block.state != BlockState.INACTIVE:
-                allocator_logger.error(f"{err}: an abnormal active block occurred whose address range exceeds the "
-                                       f"segment.")
-                return False
-            pick_idx += 1
-        self._padding_segment(segment)
-        # 尝试校验并统计size
-        offset_start = segment.address
-        for block in segment.blocks:
-            if block.address != offset_start:
-                allocator_logger.error("Reorganize segment blocks failed.")
-                return False
-            if block.state != BlockState.INACTIVE:
-                segment.active_size += block.size
-                if block.state == BlockState.ACTIVE_ALLOCATED:
-                    segment.allocated_size += block.size
-            offset_start += block.size
-        if offset_start != seg_addr_end:
-            allocator_logger.error("Reorganize segment blocks failed.")
-            return False
-        return True
-
-    def _padding_segment(self, segment: Segment):
-        """
-            重整过程中segment两端可能出现空白，padding空block
-        :param segment: 内存段
-        :return:
-        """
-        segment_start = segment.address
-        segment_end = segment.address + segment.total_size
-        # 可能出现两端有空白，padding一个空block
-        padding_size = (segment.blocks[0].address - segment_start) if segment.blocks else segment.total_size
-        if padding_size > 0:
-            segment.blocks.insert(0, Block(
-                size=padding_size,
-                requested_size=padding_size,
-                address=segment.address,
-                state=BlockState.INACTIVE,
-                frames=segment.frames,
-                segment_ptr=segment
-            ))
-        last_block_end = segment.blocks[-1].address + segment.blocks[-1].size
-        padding_size = segment_end - last_block_end
-        if padding_size > 0:
-            tail_block = Block(
-                size=padding_size,
-                requested_size=padding_size,
-                address=last_block_end,
-                state=BlockState.INACTIVE,
-                frames=segment.frames,
-                segment_ptr=segment
-            )
-            segment.blocks.append(tail_block)
-
-    def _do_alloc_block(self, block: Block, alloc_block_loc: BlockLoc) -> bool:
-        """
-            在指定位置实施分配过程，注意！！！
-            1. alloc_block_loc指定的是可用于分配新block的原始空闲块，可能会涉及大块拆分逻辑！
-            2. 此过程中也会更新block所在segment的size统计值
-        :param block: 待分配的block, 只读！！！
-        :param alloc_block_loc: 待分配block的位置
-        :return:
-        """
-        exist_segment = self.ctx.device_snapshot.segments[alloc_block_loc.seg_idx]
-        origin_block = exist_segment.blocks[alloc_block_loc.block_idx]
-        origin_block_start = origin_block.address
-        origin_block_end = origin_block_start + origin_block.size
-        new_block_start = block.address
-        new_block_end = new_block_start + block.size
-        # 左侧对齐
-        if origin_block_start == new_block_start:
-            # 如果不完全对齐
-            if origin_block_end != new_block_end:
-                # 拆成两块，执行完成后origin_block大小应与待分配块大小相同
-                slices = [block.size, origin_block_end - new_block_end]
-                if not self._split_exist_inactive_block(alloc_block_loc, slices):
-                    return False
-            # 将待分配block放置到空闲块中，注意此时不会替换对象而是将原有对象重新赋block的属性
-            self._put_new_block_into_segment_block(origin_block, block)
-            return True
-        # 右侧对齐：拆成两块，执行完成后, 第二个块的大小应与待分配块大小相同
-        # 无对齐：拆成三块，执行完成后，第二个块的大小应与待分配块大小相同
-        slices = [new_block_start - origin_block_start, block.size] \
-            if origin_block_end == new_block_end else \
-            [new_block_start - origin_block_start, block.size, origin_block_end - new_block_end]
-        if not self._split_exist_inactive_block(alloc_block_loc, slices):
-            return False
-        next_block = exist_segment.blocks[alloc_block_loc.block_idx + 1]
-        self._put_new_block_into_segment_block(next_block, block)
-        return True
-
-    def _do_free_block(self, block_loc: BlockLoc) -> bool:
-        free_block = self._get_block_by_loc(block_loc)
-        if free_block is None:
-            return False
-        exist_segment = free_block.segment_ptr
-        if exist_segment is None:
-            return False
-        # 更新统计值
-        if free_block.state != BlockState.INACTIVE:
-            exist_segment.active_size -= free_block.size
-            self.ctx.device_snapshot.total_activated -= free_block.size
-        if free_block.state == BlockState.ACTIVE_ALLOCATED:
-            exist_segment.allocated_size -= free_block.size
-            self.ctx.device_snapshot.total_allocated -= free_block.size
-        free_block.state = BlockState.INACTIVE
-        # 前向查找inactive 进行合并
-        start = block_loc.block_idx
-        _seg_blocks = exist_segment.blocks
-        while start >= 1:
-            if _seg_blocks[start - 1].state != BlockState.INACTIVE:
-                break
-            start -= 1
-        # 后向查找inactive 进行合并
-        while start + 1 <= len(_seg_blocks) - 1 and _seg_blocks[start + 1].state == BlockState.INACTIVE:
-            exist_segment.blocks[start].size += exist_segment.blocks[start + 1].size
-            del exist_segment.blocks[start + 1]
-        return True
-
-    def _do_unmap_segment(self, virtual_unmap_segment: Segment, origin_seg_idx: int) -> bool:
-        self.ctx.device_snapshot.total_reserved -= virtual_unmap_segment.total_size
-        origin_seg = self.ctx.device_snapshot.segments[origin_seg_idx]
-        origin_seg_start = origin_seg.address
-        origin_seg_end = origin_seg.address + origin_seg.total_size
-        unmap_seg_start = virtual_unmap_segment.address
-        unmap_seg_end = virtual_unmap_segment.address + virtual_unmap_segment.total_size
-        # 如果待释放的内存段在找到的内存段的左侧对齐
-        if origin_seg_start == unmap_seg_start:
-            # 如果右侧并不对齐，则需要拆成两段，第一段释放掉，第二段保留
-            if origin_seg_end != unmap_seg_end:
-                slices = [virtual_unmap_segment.total_size, origin_seg_end - unmap_seg_end]
-                if not self._split_exist_segment(origin_seg_idx, slices):
-                    return False
-            return self._drop_exist_segment(origin_seg_idx)
-        # 右侧对齐：拆成两块，执行完成后, 第二个块的大小应与待分配块大小相同
-        # 无对齐：拆成三块，执行完成后，第二个块的大小应与待分配块大小相同
-        slices = [unmap_seg_start - origin_seg_start, virtual_unmap_segment.total_size]
-        if origin_seg_end != unmap_seg_end:
-            slices.append(origin_seg_end - unmap_seg_end)
-        if not self._split_exist_segment(origin_seg_idx, slices):
-            return False
-        return self._drop_exist_segment(origin_seg_idx + 1)

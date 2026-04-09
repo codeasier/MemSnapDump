@@ -169,7 +169,7 @@ class Segment:
     alloc_or_map_event_idx: int = None
 
     @classmethod
-    def from_dict(cls, segment_dict: dict):
+    def from_dict(cls, segment_dict: dict, ignore_inactive_blocks: bool = False):
         segment = cls(
             address=segment_dict["address"],
             total_size=segment_dict["total_size"],
@@ -183,6 +183,8 @@ class Segment:
             is_expandable=segment_dict.get("is_expandable", False)
         )
         for block in segment_dict["blocks"]:
+            if ignore_inactive_blocks and block["state"] == BlockState.INACTIVE:
+                continue
             _block = Block.from_dict(block)
             _block.segment_ptr = segment
             segment.blocks.append(_block)
@@ -200,14 +202,7 @@ class Segment:
             active_size=0,
             is_expandable=event.action in ['segment_map', 'segment_unmap']
         )
-        # 从事件创建segment时，需要为segment填充一个inactive的block
-        segment.blocks = [Block(
-            size=event.size,
-            requested_size=event.size,
-            address=event.addr,
-            state=BlockState.INACTIVE,
-            segment_ptr=segment
-        )]
+        segment.blocks = []
         return segment
 
     def to_dict(self):
@@ -249,7 +244,7 @@ class DeviceSnapshot:
     device: int
 
     @classmethod
-    def from_dict(cls, snapshot_dict: dict, device: int):
+    def from_dict(cls, snapshot_dict: dict, device: int, ignore_inactive_blocks: bool = False):
         segments_dict = snapshot_dict.get("segments", [])
         device_traces = snapshot_dict.get("device_traces", [])
         device_trace_list = device_traces[device] if 0 <= device <= len(device_traces) else []
@@ -265,7 +260,7 @@ class DeviceSnapshot:
             # 此时如果from_dict指定device为0或未指定而缺省为0，则未知归属的device也会纳入分析
             if segment_dict.get("device", 0) != device:
                 continue
-            _segment = Segment.from_dict(segment_dict)
+            _segment = Segment.from_dict(segment_dict, ignore_inactive_blocks=ignore_inactive_blocks)
             snapshot.segments.append(_segment)
             snapshot.total_allocated += _segment.allocated_size
             snapshot.total_reserved += _segment.total_size
