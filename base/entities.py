@@ -191,7 +191,7 @@ class Segment:
         return segment
 
     @classmethod
-    def build_from_event(cls, event: TraceEntry):
+    def build_from_event(cls, event: TraceEntry, with_inactive_block: bool = False):
         segment = cls(
             address=event.addr,
             total_size=event.size,
@@ -202,7 +202,13 @@ class Segment:
             active_size=0,
             is_expandable=event.action in ['segment_map', 'segment_unmap']
         )
-        segment.blocks = []
+        segment.blocks = [] if not with_inactive_block else [Block(
+            size=event.size,
+            requested_size=event.size,
+            address=event.addr,
+            state=BlockState.INACTIVE,
+            segment_ptr=segment
+        )]
         return segment
 
     def to_dict(self):

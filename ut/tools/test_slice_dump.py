@@ -12,7 +12,7 @@ from util.file_util import load_pickle_to_dict
 from util.logger import suppress_logs, restore_logs
 from simulate import SimulateDeviceSnapshot
 from tools.slice_dump.hooker import SliceDumpHooker
-from ut.simulate.test_simulate import TestReplayEventHooker
+from ut.simulate.test_simulate import ReplayEventHooker
 
 test_data_dir = Path(__file__).parent.parent.resolve() / 'test-data'
 
@@ -49,7 +49,7 @@ class SliceDumpTest(unittest.TestCase):
         self.assertEqual(len(pkl_files), expect_slices)
         for pkl_file in pkl_files:
             snapshot_slice = SimulateDeviceSnapshot(load_pickle_to_dict(pkl_file), 0)
-            snapshot_slice.register_hooker(TestReplayEventHooker(self))
+            snapshot_slice.register_hooker(ReplayEventHooker(self))
             self.assertTrue(snapshot_slice.replay())
 
     def testSplitExpandableSnapshot(self):
@@ -66,7 +66,7 @@ class SliceDumpTest(unittest.TestCase):
         self.assertEqual(len(pkl_files), expect_slices)
         for pkl_file in pkl_files:
             snapshot_slice = SimulateDeviceSnapshot(load_pickle_to_dict(pkl_file), 0)
-            snapshot_slice.register_hooker(TestReplayEventHooker(self))
+            snapshot_slice.register_hooker(ReplayEventHooker(self))
             self.assertTrue(snapshot_slice.replay())
 
 

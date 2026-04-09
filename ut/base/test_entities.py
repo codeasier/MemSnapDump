@@ -239,7 +239,7 @@ class TestSegment(unittest.TestCase):
             "frames": []
         }
         event = TraceEntry.from_dict(trace_dict)
-        segment = Segment.build_from_event(event)
+        segment = Segment.build_from_event(event, True)
         self.assertEqual(segment.address, 0x20000)
         self.assertEqual(segment.total_size, 8192)
         self.assertEqual(segment.stream, 1)
