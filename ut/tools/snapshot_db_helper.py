@@ -75,7 +75,7 @@ class SnapshotDbHandler:
         )
 
     @staticmethod
-    def find_segment_idx_by_addr(segments, addr: int) -> int:
+    def find_segment_idx_by_addr(segments, addr: int, stream: int = None) -> int:
         left = 0
         right = len(segments) - 1
         while left <= right:
@@ -85,6 +85,20 @@ class SnapshotDbHandler:
             elif addr >= segments[mid].address + segments[mid].total_size:
                 left = mid + 1
             else:
+                # 地址范围内，如果指定了 stream 还需验证 stream 匹配
+                if stream is not None and segments[mid].stream != stream:
+                    # 同地址可能存在多个不同 stream 的 segment，需要线性搜索
+                    for i in range(mid, -1, -1):
+                        if addr < segments[i].address:
+                            break
+                        if addr < segments[i].address + segments[i].total_size and segments[i].stream == stream:
+                            return i
+                    for i in range(mid + 1, len(segments)):
+                        if addr < segments[i].address:
+                            break
+                        if addr < segments[i].address + segments[i].total_size and segments[i].stream == stream:
+                            return i
+                    return -1
                 return mid
         return -1
 
@@ -93,15 +107,15 @@ class SnapshotDbHandler:
         segments: List[Segment] = list()
         for evt in events:
             if evt.action == 'segment_alloc':
-                insert_idx = bisect.bisect_left([seg.address for seg in segments], evt.addr)
+                insert_idx = bisect.bisect_left([(seg.address, seg.stream) for seg in segments], (evt.addr, evt.stream))
                 segment = Segment.build_from_event(evt)
                 segment.blocks = list()
                 segments.insert(insert_idx, segment)
             elif evt.action == 'segment_free':
-                idx = bisect.bisect_left([seg.address for seg in segments], evt.addr)
+                idx = bisect.bisect_left([(seg.address, seg.stream) for seg in segments], (evt.addr, evt.stream))
                 del segments[idx]
             elif evt.action == 'segment_map':
-                idx = bisect.bisect_left([seg.address for seg in segments], evt.addr)
+                idx = bisect.bisect_left([(seg.address, seg.stream) for seg in segments], (evt.addr, evt.stream))
                 seg = Segment.build_from_event(evt)
                 seg.blocks = list()
                 segments.insert(idx, seg)
@@ -115,7 +129,7 @@ class SnapshotDbHandler:
                     else:
                         break
             elif evt.action == 'segment_unmap':
-                exist_seg_idx = SnapshotDbHandler.find_segment_idx_by_addr(segments, evt.addr)
+                exist_seg_idx = SnapshotDbHandler.find_segment_idx_by_addr(segments, evt.addr, evt.stream)
                 exist_seg = segments[exist_seg_idx]
                 if evt.addr > exist_seg.address:
                     exist_seg_idx += 1

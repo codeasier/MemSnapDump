@@ -40,7 +40,8 @@ class SimulatedCachingAllocator:
         :param new_block: 待分配的block
         """
         _error = "Failed to simulate alloc block"
-        gap_result = self.find_gap_for_alloc_block(new_block.address, new_block.size)
+        gap_result = self.find_gap_for_alloc_block(new_block.address, new_block.size,
+                                                    self.ctx.current_undo_event.stream if self.ctx.current_undo_event else None)
         if gap_result is None:
             allocator_logger.error(f"{_error}: cannot find gap for block (addr={new_block.address}, size={new_block.size})")
             return False
@@ -71,7 +72,7 @@ class SimulatedCachingAllocator:
         :param alloc_event: 待回滚的alloc事件
         """
         _error = "Failed to simulate free block"
-        seg_idx = self.ctx.device_snapshot.find_segment_idx_by_addr(alloc_event.addr)
+        seg_idx = self.ctx.device_snapshot.find_segment_idx_by_addr(alloc_event.addr, alloc_event.stream)
         if seg_idx == -1:
             allocator_logger.error(f"{_error}: cannot find segment for block (addr={alloc_event.addr})")
             return False
@@ -110,7 +111,7 @@ class SimulatedCachingAllocator:
         :param free_requested_event: 待回放的free_requested请求
         """
         _error = "Failed to simulate active block"
-        seg_idx = self.ctx.device_snapshot.find_segment_idx_by_addr(free_requested_event.addr)
+        seg_idx = self.ctx.device_snapshot.find_segment_idx_by_addr(free_requested_event.addr, free_requested_event.stream)
         if seg_idx == -1:
             allocator_logger.error(f"{_error}: cannot find segment for block (addr={free_requested_event.addr})")
             return False
@@ -235,7 +236,7 @@ class SimulatedCachingAllocator:
         virtual_free_segment = Segment.build_from_event(map_event)
         seg_addr = virtual_free_segment.address
         unmap_size = virtual_free_segment.total_size
-        exist_seg_idx = self.ctx.device_snapshot.find_segment_idx_by_addr(seg_addr)
+        exist_seg_idx = self.ctx.device_snapshot.find_segment_idx_by_addr(seg_addr, map_event.stream)
         if exist_seg_idx < 0 or exist_seg_idx >= len(segments):
             allocator_logger.error(f"{_error}: cannot found segment(addr={seg_addr})")
             return False
@@ -294,8 +295,8 @@ class SimulatedCachingAllocator:
                 right = mid - 1
         return None
 
-    def find_gap_for_alloc_block(self, event_addr: int, event_size: int) -> Optional[Tuple[Segment, int]]:
-        seg_idx = self.ctx.device_snapshot.find_segment_idx_by_addr(event_addr)
+    def find_gap_for_alloc_block(self, event_addr: int, event_size: int, stream: int = None) -> Optional[Tuple[Segment, int]]:
+        seg_idx = self.ctx.device_snapshot.find_segment_idx_by_addr(event_addr, stream)
         if seg_idx == -1:
             return None
         segment = self.ctx.device_snapshot.segments[seg_idx]
@@ -334,7 +335,8 @@ class SimulatedCachingAllocator:
 
     def insert_segment_sorted(self, segment: Segment):
         segments = self.ctx.device_snapshot.segments
-        idx = bisect.bisect_left([seg.address for seg in segments], segment.address)
+        keys = [(seg.address, seg.stream) for seg in segments]
+        idx = bisect.bisect_left(keys, (segment.address, segment.stream))
         segments.insert(idx, segment)
 
     def split_segment_at(self, seg_idx: int, cut_addr: int, cut_size: int) -> bool:

@@ -353,6 +353,32 @@ class TestDeviceSnapshot(unittest.TestCase):
         self.assertEqual(snapshot.find_segment_idx_by_addr(0x9000), -1)
         self.assertEqual(snapshot.find_segment_idx_by_addr(0x40000), -1)
 
+    def test_find_segment_idx_by_addr_with_stream(self):
+        # 测试不同 stream 地址重叠的场景
+        snapshot = DeviceSnapshot()
+        # 按 (address, stream) 排序
+        snapshot.segments = [
+            Segment(address=0x10000, total_size=0x2000, stream=0),
+            Segment(address=0x10000, total_size=0x3000, stream=1),
+            Segment(address=0x20000, total_size=0x5000, stream=0),
+            Segment(address=0x30000, total_size=0x1000, stream=1),
+        ]
+        # 不指定 stream 时，按地址范围匹配，返回某个满足条件的（向后兼容）
+        result = snapshot.find_segment_idx_by_addr(0x10000)
+        self.assertIn(result, [0, 1])  # 可能返回 stream=0 或 stream=1 的
+        # 指定 stream=0 时
+        self.assertEqual(snapshot.find_segment_idx_by_addr(0x10000, stream=0), 0)
+        # 指定 stream=1 时
+        self.assertEqual(snapshot.find_segment_idx_by_addr(0x10000, stream=1), 1)
+        # 指定不存在的 stream
+        self.assertEqual(snapshot.find_segment_idx_by_addr(0x10000, stream=2), -1)
+        # 地址范围匹配但指定不同 stream
+        self.assertEqual(snapshot.find_segment_idx_by_addr(0x20000, stream=0), 2)
+        self.assertEqual(snapshot.find_segment_idx_by_addr(0x20000, stream=1), -1)
+        # stream=1 的 segment 范围测试
+        self.assertEqual(snapshot.find_segment_idx_by_addr(0x11000, stream=1), 1)
+        self.assertEqual(snapshot.find_segment_idx_by_addr(0x30000, stream=1), 3)
+
     def test_to_dict(self):
         snapshot_dict = {
             "segments": [],

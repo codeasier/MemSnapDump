@@ -271,7 +271,7 @@ class DeviceSnapshot:
             snapshot.total_allocated += _segment.allocated_size
             snapshot.total_reserved += _segment.total_size
             snapshot.total_activated += _segment.active_size
-        snapshot.segments.sort(key=lambda segment: segment.address)
+        snapshot.segments.sort(key=lambda segment: (segment.address, segment.stream))
         # 读取事件序列
         for idx, trace_entry_dict in enumerate(device_trace_list):
             trace_entry = TraceEntry.from_dict(trace_entry_dict)
@@ -287,7 +287,7 @@ class DeviceSnapshot:
             'device_traces': [[] for _ in range(self.device)] + [[trace.to_dict() for trace in self.trace_entries]]
         }
 
-    def find_segment_idx_by_addr(self, addr: int) -> int:
+    def find_segment_idx_by_addr(self, addr: int, stream: int = None) -> int:
         left = 0
         segments = self.segments
         right = len(segments) - 1
@@ -298,5 +298,16 @@ class DeviceSnapshot:
             elif addr >= segments[mid].address + segments[mid].total_size:
                 left = mid + 1
             else:
+                # 地址范围内，如果指定了 stream 还需验证 stream 匹配
+                if stream is not None and segments[mid].stream != stream:
+                    # 同地址按 stream 升序排列，根据大小关系确定搜索方向和 range
+                    step = -1 if stream < segments[mid].stream else 1
+                    end = -1 if step == -1 else len(segments)
+                    for i in range(mid + step, end, step):
+                        if addr < segments[i].address:
+                            break
+                        if addr < segments[i].address + segments[i].total_size and segments[i].stream == stream:
+                            return i
+                    return -1
                 return mid
         return -1
