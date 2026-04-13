@@ -1,10 +1,3 @@
-import sys
-from pathlib import Path
-
-project_dir = Path(__file__).parent.parent.parent.resolve()
-if project_dir not in sys.path:
-    sys.path.append(str(project_dir))
-
 import bisect
 import sqlite3
 from typing import List

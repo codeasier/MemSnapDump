@@ -54,16 +54,22 @@ def set_global_log_file(log_file: str) -> None:
     _attach_file_handler_to_existing_loggers()
 
 
+_original_levels: dict[str, int] = {}
+
+
 def suppress_logs():
     """Suppress INFO level logs during tests"""
     for name in list(logging.Logger.manager.loggerDict.keys()):
-        logging.getLogger(name).setLevel(logging.WARNING)
+        logger = logging.getLogger(name)
+        _original_levels[name] = logger.level
+        logger.setLevel(logging.WARNING)
 
 
 def restore_logs():
-    """Restore log levels after tests"""
-    for name in list(logging.Logger.manager.loggerDict.keys()):
-        logging.getLogger(name).setLevel(logging.INFO)
+    """Restore original log levels after tests"""
+    for name, level in _original_levels.items():
+        logging.getLogger(name).setLevel(level)
+    _original_levels.clear()
 
 
 def _attach_file_handler_to_existing_loggers() -> None:

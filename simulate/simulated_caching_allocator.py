@@ -1,6 +1,6 @@
 import copy
 import bisect
-from typing import Dict, Tuple, Optional, List
+from typing import Dict, Tuple, Optional
 
 from base import DeviceSnapshot, BlockState, Block, Segment, TraceEntry
 from util import get_logger
@@ -190,8 +190,14 @@ class SimulatedCachingAllocator:
         else:
             self.insert_segment_sorted(new_segment)
             new_idx = segments.index(new_segment)
-            if not self.merge_segments(new_idx, right_adjacent_idx if right_adjacent_idx > new_idx else right_adjacent_idx + 1):
-                allocator_logger.error(f"{_error}: failed to merge right segment")
+            # 插入后右相邻索引后移一位，重新计算以保持健壮性
+            corrected_right_idx = new_idx + 1
+            if corrected_right_idx < len(segments) and segments[corrected_right_idx].address == new_seg_end:
+                if not self.merge_segments(new_idx, corrected_right_idx):
+                    allocator_logger.error(f"{_error}: failed to merge right segment")
+                    return False
+            else:
+                allocator_logger.error(f"{_error}: right adjacent segment not found after insert (expected addr={new_seg_end})")
                 return False
         self.ctx.device_snapshot.total_reserved += virtual_map_segment.total_size
         for hooker in self.hookers.values():
@@ -274,9 +280,11 @@ class SimulatedCachingAllocator:
         return True
 
     def find_segment_by_exact_addr(self, addr: int, stream: int) -> Optional[Segment]:
-        for segment in self.ctx.device_snapshot.segments:
-            if segment.address == addr and segment.stream == stream:
-                return segment
+        seg_idx = self.ctx.device_snapshot.find_segment_idx_by_addr(addr, stream)
+        if seg_idx != -1:
+            seg = self.ctx.device_snapshot.segments[seg_idx]
+            if seg.address == addr and seg.stream == stream:
+                return seg
         return None
 
     def find_block_by_addr(self, seg_idx: int, block_addr: int) -> Optional[Block]:
@@ -353,7 +361,7 @@ class SimulatedCachingAllocator:
             allocator_logger.error(f"{_error}: cut range [{cut_addr}, {cut_end}) is outside segment [{seg_start}, {seg_end})")
             return False
         if cut_addr == seg_start and cut_end == seg_end:
-            allocator_logger.warning(f"Split Seg: cut range covers entire segment, nothing to split, just remove it")
+            allocator_logger.warning("Split Seg: cut range covers entire segment, nothing to split, just remove it")
             del self.ctx.device_snapshot.segments[seg_idx]
             return True
         left_segment = Segment(
