@@ -1,4 +1,5 @@
 import sys
+import os
 from pathlib import Path
 
 project_dir = Path(__file__).parent.parent.parent.resolve()
@@ -78,7 +79,8 @@ class TestSimulate(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        suppress_logs()
+        if os.getenv("UT_VERBOSE_LOG") != "1":
+            suppress_logs()
 
     @classmethod
     def tearDownClass(cls):

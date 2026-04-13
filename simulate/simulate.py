@@ -2,9 +2,11 @@ from typing import Dict
 
 from util import get_logger
 from logging import Logger
-from base import DeviceSnapshot, Segment, TraceEntry, Block, BlockState
+from base import DeviceSnapshot, TraceEntry
 
-from .simulated_caching_allocator import SimulatedCachingAllocator, AllocatorContext
+from .allocator_context import AllocatorContext
+from .simulated_caching_allocator import SimulatedCachingAllocator
+from .replay_executor import ReplayExecutor
 from .hooker_defs import SimulateHooker, AllocatorHooker
 
 loading_logger = get_logger("LOAD")
@@ -31,6 +33,7 @@ class SimulateDeviceSnapshot:
         self.hookers = dict[int, SimulateHooker]()
         self.simulated_allocator_context = AllocatorContext(snapshot=self.device_snapshot)
         self.simulated_allocator = SimulatedCachingAllocator(self.simulated_allocator_context)
+        self.replay_executor = ReplayExecutor(self.simulated_allocator, self._replay_logger)
         # 识别昇腾torch-npu采集的snapshot中的workspace事件
         if self.device_snapshot.trace_entries and self.device_snapshot.trace_entries[0].action == 'workspace_snapshot':
             self.simulated_allocator_context.workspace_flag = True
@@ -65,7 +68,7 @@ class SimulateDeviceSnapshot:
                     return False
             event = self.device_snapshot.trace_entries[-1]
             self.simulated_allocator_context.set_current_undo_event(event)
-            if not self._replay_single_event(event):
+            if not self.replay_executor.execute(event):
                 self._replay_logger.error(f"An interruption occurred during the replay of the single event.")
                 return False
             self.device_snapshot.trace_entries.pop()
@@ -81,22 +84,3 @@ class SimulateDeviceSnapshot:
         self._replay_logger.info("All events have been successfully replayed.")
         return True
 
-    def _replay_single_event(self, event: TraceEntry) -> bool:
-        if event.action in ["free", "free_completed"]:
-            _block = Block.build_from_event(event)
-            _block.state = BlockState.ACTIVE_ALLOCATED if event.action == "free" else BlockState.ACTIVE_PENDING_FREE
-            return self.simulated_allocator.alloc_block(_block)
-        if event.action == "free_requested":
-            return self.simulated_allocator.active_block(event)
-        if event.action == "alloc":
-            return self.simulated_allocator.free_block(event)
-        if event.action in ["segment_free", "segment_unmap"]:
-            _segment = Segment.build_from_event(event)
-            _segment.free_or_unmap_event_idx = event.idx
-            return self.simulated_allocator.alloc_or_map_segment(_segment, merge=event.action == "segment_unmap")
-        if event.action == "segment_alloc":
-            return self.simulated_allocator.free_segment(event)
-        if event.action == "segment_map":
-            return self.simulated_allocator.unmap_segment(event)
-        self._replay_logger.warning(f"Skip event{event.to_dict()} during replay.")
-        return True
