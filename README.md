@@ -93,8 +93,8 @@ class AllocatorHooker(ABC):
 ```
 使用示例代码如下：
 ```python
-from base import TraceEntry, DeviceSnapshot
-from simulate import SimulateDeviceSnapshot, SimulateHooker
+from memsnapdump.base import TraceEntry, DeviceSnapshot
+from memsnapdump.simulate import SimulateDeviceSnapshot, SimulateHooker
 
 
 class ExamplePrintHooker(SimulateHooker):
@@ -110,7 +110,7 @@ class ExamplePrintHooker(SimulateHooker):
 if __name__ == '__main__':
     import pandas as pd
 
-    df = pd.read_pickle('test-data/snapshot.pkl')  # 基于pandas解析pickle文件
+    df = pd.read_pickle('tests/test_data/snapshot.pkl')  # 基于pandas解析pickle文件
     snapshot = SimulateDeviceSnapshot(df, 0)  # 初始化可回放的snapshot对象
     snapshot.register_hooker(ExamplePrintHooker())  # 注册样例钩子
     snapshot.replay()  # 开始回放
@@ -127,7 +127,7 @@ if __name__ == '__main__':
 #### 2.2.3 使用方式
 ```shell
 # 在项目根目录下执行
-python tools.split [-h] [--device DEVICE] [--slices SLICES] [--max_entries MAX_ENTRIES] [--dump_dir DUMP_DIR] 
+python -m memsnapdump.tools.split [-h] [--device DEVICE] [--slices SLICES] [--max_entries MAX_ENTRIES] [--dump_dir DUMP_DIR] 
 [--dump_type {pkl,json}] snapshot_file
 ```
   | 参数                  | 类型 | 必填 | 默认值            | 说明                                                                    |
@@ -146,7 +146,7 @@ _**方式一：按照固定切片数进行切片**_
 以切分4份为例，执行如下命令：
 
 ```shell
- python tools.split /data/snapshot.pickle --slices 4
+ python -m memsnapdump.tools.split /data/snapshot.pickle --slices 4
 ```
 
 将 61 个事件平均分为 4 个切片，每个切片约 15–16 个事件。 每段输出：该段结束时的内存状态 + 本段包含的事件列表。
@@ -162,7 +162,7 @@ _**方式二：固定单片最大事件数切片**_
 
 以每片最大20个事件为例，执行如下命令
 ```shell
-python tools.split /data/snapshot.pickle --max_entries 20
+python -m memsnapdump.tools.split /data/snapshot.pickle --max_entries 20
 ```
 
 | 切片 | 内存状态       | 事件范围         | 事件数量 | 输出件 |
@@ -186,7 +186,7 @@ python tools.split /data/snapshot.pickle --max_entries 20
 #### 2.3.3 使用方式
 ```shell
 # 在项目根目录下执行
-python tools.dump2db [-h] [--dump_dir DUMP_DIR] [--log LOG_FILE] snapshot_file
+python -m memsnapdump.tools.dump2db [-h] [--dump_dir DUMP_DIR] [--log LOG_FILE] snapshot_file
 ```
 | 参数                  | 类型 | 必填 | 默认值            | 说明                                                                    |
 |---------------------|------|------|----------------|-----------------------------------------------------------------------|
@@ -198,7 +198,7 @@ python tools.dump2db [-h] [--dump_dir DUMP_DIR] [--log LOG_FILE] snapshot_file
 假设已有 snapshot 文件 `/data/snapshot.pickle`，执行如下命令：
 
 ```shell
-python tools.dump2db /data/snapshot.pickle -o /data/output
+python -m memsnapdump.tools.dump2db /data/snapshot.pickle -o /data/output
 ```
 
 将在 `/data/output` 目录下生成 `/data/output/snapshot.pickle.db` 数据库文件。
@@ -206,7 +206,7 @@ python tools.dump2db /data/snapshot.pickle -o /data/output
 若需要将日志保存到文件以便后续分析：
 
 ```shell
-python tools.dump2db /data/snapshot.pickle -o /data/output -l /data/output/dump.log
+python -m memsnapdump.tools.dump2db /data/snapshot.pickle -o /data/output -l /data/output/dump.log
 ```
 
 日志文件将记录所有模块（LOAD、REPLAY、ALLOCATOR、DatabaseDump）的输出信息。
@@ -214,47 +214,24 @@ python tools.dump2db /data/snapshot.pickle -o /data/output -l /data/output/dump.
 ## 3. 项目结构说明
 ```text
 MemSnapDump/
-├── base/               # 基础Snapshot相关数据模型与实体定义
-│   ├── __init__.py     
-│   └── entities.py     # 定义核心数据结构（如 Event, Segment, Block, TraceEntry 等）
-│
-├── simulate/           # 模拟与回放逻辑
-│   ├── __init__.py     
-│   ├── hooker_defs.py                  # 各类回放过程中可派生的钩子类基类（SimulateHooker, AllocatorHooker）
-│   ├── simulated_caching_allocator.py  # 快照回放模拟内存分配器的核心定义与实现
-│   └── simulate.py                     # 主要类：SimulateDeviceSnapshot，负责事件回放与 hook 注册
-│
-├── tools/                 # 工具模块：提供核心功能命令行工具
-│   ├── split.py           # 快照切片命令行入口
-│   ├── dump2db.py         # 快照转数据库命令行入口
-│   ├── slice_dump/        # 快照剪裁工具核心实现
-│   │   ├── __init__.py
-│   │   ├── dump.py        # 命令行参数定义与解析
-│   │   └── hooker.py      # 实现快照剪裁的核心回放钩子
-│   └── adaptors/          # 数据适配器模块
+├── src/
+│   └── memsnapdump/
 │       ├── __init__.py
-│       ├── snapshot2db.py # 快照转数据库核心实现
-│       └── database/      # 数据库相关定义
-│           ├── __init__.py
-│           ├── defs.py        # 数据库字段定义
-│           ├── entity2record.py # 实体到记录的转换
-│           └── snapshot_db.py  # 数据库表结构定义
-│
-├── util/               # 工具函数与辅助模块
-│   ├── __init__.py     
-│   ├── logger.py       # 日志模块
-│   ├── timer.py        # 计时器装饰器
-│   ├── file_util.py    # 文件操作工具函数
-│   └── sqlite_meta.py  # SQLite 元数据管理模块
-│
-├── test/                  # 测试代码
-│   ├── test-data/         # 测试用例的数据文件
-│   ├── common.py          # 测试用例中的公共方法
-│   ├── simulate_test.py   # 快照回放模块的单元测试
-│   └── tools_test/        # 工具模块测试
-│       ├── slice_dump_test.py   # 快照剪裁工具的单元测试
-│       ├── snapshot2db_test.py  # 快照转数据库的单元测试
-│       └── snapshot_db_analyze.py # 数据库分析测试工具
-│
-└── README.md           # 项目说明文档
+│       ├── base/               # 基础 Snapshot 数据模型与实体定义
+│       ├── simulate/           # 模拟与回放逻辑
+│       ├── tools/              # 命令行入口与工具实现
+│       │   ├── split.py        # 快照切片命令行入口
+│       │   ├── dump2db.py      # 快照转数据库命令行入口
+│       │   ├── slice_dump/     # 快照剪裁工具核心实现
+│       │   └── adaptors/       # 数据适配器模块
+│       └── util/               # 日志、计时、文件、SQLite 元数据等工具
+├── tests/
+│   ├── test_data/              # 测试样例数据
+│   ├── common.py               # 测试公共辅助函数
+│   ├── base/                   # base 模块测试
+│   ├── simulate/               # simulate 模块测试
+│   ├── tools/                  # CLI 与工具模块测试
+│   └── util/                   # util 模块测试
+├── pyproject.toml              # 打包、pytest、coverage 配置
+└── README.md                   # 项目说明文档
 ```
