@@ -33,17 +33,6 @@ memsnapdump split -h
 memsnapdump dump2db -h
 ```
 
-### Replay a snapshot in Python
-
-```python
-import pandas as pd
-from memsnapdump.simulate import SimulateDeviceSnapshot
-
-snapshot_dict = pd.read_pickle("tests/test_data/snapshot_expandable.pkl")
-snapshot = SimulateDeviceSnapshot(snapshot_dict, 0)
-snapshot.replay()
-```
-
 ### Split a large snapshot
 
 ```bash
@@ -54,6 +43,39 @@ memsnapdump split /data/snapshot.pickle --slices 4
 
 ```bash
 memsnapdump dump2db /data/snapshot.pickle -o /data/output
+```
+
+## Extension and customization
+
+For memory snapshot replay, the Python API is intended primarily for extension and custom development rather than quick CLI-style usage. You can register custom hooks into the replay process to add your own statistics, validation, export, or observability logic while allocator state is reconstructed.
+
+```python
+from pathlib import Path
+
+from memsnapdump.simulate import SimulateDeviceSnapshot, SimulateHooker
+from memsnapdump.util.file_util import load_pickle_to_dict
+
+
+class EventCounterHooker(SimulateHooker):
+    def __init__(self):
+        self.count = 0
+
+    def pre_undo_event(self, wait4undo_event, current_snapshot) -> bool:
+        self.count += 1
+        return True
+
+    def post_undo_event(self, already_undo_event, current_snapshot) -> bool:
+        return True
+
+
+snapshot_dict = load_pickle_to_dict(Path("tests/test_data/snapshot_expandable.pkl"))
+snapshot = SimulateDeviceSnapshot(snapshot_dict, 0)
+
+hooker = EventCounterHooker()
+snapshot.register_hooker(hooker)
+snapshot.replay()
+
+print(f"replayed events: {hooker.count}")
 ```
 
 ## Documentation
