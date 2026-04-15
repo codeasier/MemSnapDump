@@ -1,4 +1,5 @@
 import argparse
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,7 +10,12 @@ from memsnapdump import cli as cli_mod
 from memsnapdump.tools.slice_dump import dump as slice_dump_mod
 from memsnapdump.tools.adaptors import snapshot2db as snapshot2db_mod
 
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
 runner = CliRunner()
+
+
+def _clean_output(text: str) -> str:
+    return ANSI_ESCAPE_RE.sub("", text)
 
 
 def test_slice_dump_get_args_accepts_explicit_argv(tmp_path: Path):
@@ -40,25 +46,27 @@ def test_root_cli_shows_version():
 
 
 def test_root_cli_split_help_shows_real_options():
-    result = runner.invoke(cli_mod.app, ["split", "--help"])
+    result = runner.invoke(cli_mod.app, ["split", "--help"], color=False)
 
+    output = _clean_output(result.stdout)
     assert result.exit_code == 0
-    assert "snapshot_file" in result.stdout
-    assert "--device" in result.stdout
-    assert "--slices" in result.stdout
-    assert "--max-entries" in result.stdout
-    assert "--dump-dir" in result.stdout
-    assert "--dump-type" in result.stdout
+    assert "snapshot_file" in output
+    assert "--device" in output
+    assert "--slices" in output
+    assert "--max-entries" in output
+    assert "--dump-dir" in output
+    assert "--dump-type" in output
 
 
 def test_root_cli_dump2db_help_shows_real_options():
-    result = runner.invoke(cli_mod.app, ["dump2db", "--help"])
+    result = runner.invoke(cli_mod.app, ["dump2db", "--help"], color=False)
 
+    output = _clean_output(result.stdout)
     assert result.exit_code == 0
-    assert "snapshot_file" in result.stdout
-    assert "--device" in result.stdout
-    assert "--dump-dir" in result.stdout
-    assert "--log" in result.stdout
+    assert "snapshot_file" in output
+    assert "--device" in output
+    assert "--dump-dir" in output
+    assert "--log" in output
 
 
 def test_root_cli_dispatches_split(monkeypatch):
@@ -206,9 +214,7 @@ def test_snapshot2db_get_args_uses_snapshot_parent_as_default_dump_dir(
     assert args.device is None
 
 
-def test_run_dump_to_db_returns_success_when_dump_succeeds(
-    monkeypatch, tmp_path: Path
-):
+def test_run_dump_to_db_returns_success_when_dump_succeeds(monkeypatch, tmp_path: Path):
     snapshot_file = tmp_path / "snapshot.pkl"
     snapshot_file.write_bytes(b"data")
     monkeypatch.setattr(snapshot2db_mod, "dump", lambda *a, **k: True)
@@ -223,9 +229,7 @@ def test_run_dump_to_db_returns_success_when_dump_succeeds(
     assert result is True
 
 
-def test_run_dump_to_db_returns_failed_when_dump_fails(
-    monkeypatch, tmp_path: Path
-):
+def test_run_dump_to_db_returns_failed_when_dump_fails(monkeypatch, tmp_path: Path):
     snapshot_file = tmp_path / "snapshot.pkl"
     snapshot_file.write_bytes(b"data")
     monkeypatch.setattr(snapshot2db_mod, "dump", lambda *a, **k: False)

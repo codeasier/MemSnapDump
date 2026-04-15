@@ -11,7 +11,6 @@ from memsnapdump.util.file_util import (
 from memsnapdump.simulate import SimulateDeviceSnapshot
 from .hooker import SliceDumpHooker
 
-
 dump_logger = get_logger("DUMP")
 
 

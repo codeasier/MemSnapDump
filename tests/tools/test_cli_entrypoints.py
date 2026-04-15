@@ -1,21 +1,33 @@
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 SRC_DIR = str(Path(__file__).resolve().parents[2] / "src")
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
-def _run_module_help(module_name: str):
+def _cli_env():
     env = os.environ.copy()
     env["PYTHONPATH"] = (
         SRC_DIR if not env.get("PYTHONPATH") else f"{SRC_DIR}:{env['PYTHONPATH']}"
     )
+    env["NO_COLOR"] = "1"
+    env["TERM"] = "dumb"
+    return env
+
+
+def _clean_output(text: str) -> str:
+    return ANSI_ESCAPE_RE.sub("", text)
+
+
+def _run_module_help(module_name: str):
     return subprocess.run(
         [sys.executable, "-m", module_name, "--help"],
         capture_output=True,
         text=True,
-        env=env,
+        env=_cli_env(),
     )
 
 
@@ -43,109 +55,91 @@ def test_root_cli_module_help_runs():
 
 
 def test_root_cli_module_short_help_runs():
-    env = os.environ.copy()
-    env["PYTHONPATH"] = (
-        SRC_DIR if not env.get("PYTHONPATH") else f"{SRC_DIR}:{env['PYTHONPATH']}"
-    )
     result = subprocess.run(
         [sys.executable, "-m", "memsnapdump.cli", "-h"],
         capture_output=True,
         text=True,
-        env=env,
+        env=_cli_env(),
     )
 
+    output = _clean_output(result.stdout)
     assert result.returncode == 0
-    assert "usage" in result.stdout.lower()
+    assert "usage" in output.lower()
 
 
 def test_root_cli_module_version_runs():
-    env = os.environ.copy()
-    env["PYTHONPATH"] = (
-        SRC_DIR if not env.get("PYTHONPATH") else f"{SRC_DIR}:{env['PYTHONPATH']}"
-    )
     result = subprocess.run(
         [sys.executable, "-m", "memsnapdump.cli", "--version"],
         capture_output=True,
         text=True,
-        env=env,
+        env=_cli_env(),
     )
 
+    output = _clean_output(result.stdout)
     assert result.returncode == 0
-    assert "0.1.0" in result.stdout
+    assert "0.1.0" in output
 
 
 def test_root_cli_module_split_help_runs():
-    env = os.environ.copy()
-    env["PYTHONPATH"] = (
-        SRC_DIR if not env.get("PYTHONPATH") else f"{SRC_DIR}:{env['PYTHONPATH']}"
-    )
     result = subprocess.run(
         [sys.executable, "-m", "memsnapdump.cli", "split", "--help"],
         capture_output=True,
         text=True,
-        env=env,
+        env=_cli_env(),
     )
 
+    output = _clean_output(result.stdout)
     assert result.returncode == 0
-    assert "snapshot_file" in result.stdout
-    assert "--device" in result.stdout
-    assert "--slices" in result.stdout
-    assert "--max-entries" in result.stdout
-    assert "--dump-dir" in result.stdout
-    assert "--dump-type" in result.stdout
+    assert "snapshot_file" in output
+    assert "--device" in output
+    assert "--slices" in output
+    assert "--max-entries" in output
+    assert "--dump-dir" in output
+    assert "--dump-type" in output
 
 
 def test_root_cli_module_split_short_help_runs():
-    env = os.environ.copy()
-    env["PYTHONPATH"] = (
-        SRC_DIR if not env.get("PYTHONPATH") else f"{SRC_DIR}:{env['PYTHONPATH']}"
-    )
     result = subprocess.run(
         [sys.executable, "-m", "memsnapdump.cli", "split", "-h"],
         capture_output=True,
         text=True,
-        env=env,
+        env=_cli_env(),
     )
 
+    output = _clean_output(result.stdout)
     assert result.returncode == 0
-    assert "snapshot_file" in result.stdout
-    assert "--device" in result.stdout
+    assert "snapshot_file" in output
+    assert "--device" in output
 
 
 def test_root_cli_module_dump2db_help_shows_real_options():
-    env = os.environ.copy()
-    env["PYTHONPATH"] = (
-        SRC_DIR if not env.get("PYTHONPATH") else f"{SRC_DIR}:{env['PYTHONPATH']}"
-    )
     result = subprocess.run(
         [sys.executable, "-m", "memsnapdump.cli", "dump2db", "--help"],
         capture_output=True,
         text=True,
-        env=env,
+        env=_cli_env(),
     )
 
+    output = _clean_output(result.stdout)
     assert result.returncode == 0
-    assert "snapshot_file" in result.stdout
-    assert "--device" in result.stdout
-    assert "--dump-dir" in result.stdout
-    assert "--log" in result.stdout
+    assert "snapshot_file" in output
+    assert "--device" in output
+    assert "--dump-dir" in output
+    assert "--log" in output
 
 
 def test_root_cli_module_dump2db_short_help_runs():
-    env = os.environ.copy()
-    env["PYTHONPATH"] = (
-        SRC_DIR if not env.get("PYTHONPATH") else f"{SRC_DIR}:{env['PYTHONPATH']}"
-    )
     result = subprocess.run(
         [sys.executable, "-m", "memsnapdump.cli", "dump2db", "-h"],
         capture_output=True,
         text=True,
-        env=env,
+        env=_cli_env(),
     )
 
+    output = _clean_output(result.stdout)
     assert result.returncode == 0
-    assert "snapshot_file" in result.stdout
-    assert "--log" in result.stdout
+    assert "snapshot_file" in output
+    assert "--log" in output
 
 
 def test_split_module_help_runs():

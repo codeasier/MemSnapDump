@@ -76,9 +76,7 @@ def dump2db(
     dump_dir: Annotated[
         str, typer.Option("--dump-dir", "-o", help="Output directory.")
     ] = "",
-    log_file: Annotated[
-        str, typer.Option("--log", "-l", help="Log file path.")
-    ] = "",
+    log_file: Annotated[str, typer.Option("--log", "-l", help="Log file path.")] = "",
     device: Annotated[
         int | None,
         typer.Option("--device", "-d", min=0, help="Specific device id."),
