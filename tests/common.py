@@ -1,6 +1,6 @@
 import unittest
 from typing import List
-from memsnapdump.base import Segment, BlockState
+from memsnapdump.base import DeviceSnapshot, Segment, BlockState
 
 
 def valid_segment(segment: Segment, test_util: unittest.TestCase):
@@ -29,3 +29,16 @@ def valid_segments(segments: List[Segment], test_util: unittest.TestCase):
         valid_segment(seg, test_util)
         pre_seg_start = seg_start
         pre_seg_end = seg_end
+
+
+def valid_snapshot(snapshot: DeviceSnapshot, test_util: unittest.TestCase):
+    valid_segments(snapshot.segments, test_util)
+    test_util.assertEqual(
+        sum(seg.total_size for seg in snapshot.segments), snapshot.total_reserved
+    )
+    test_util.assertEqual(
+        sum(seg.allocated_size for seg in snapshot.segments), snapshot.total_allocated
+    )
+    test_util.assertEqual(
+        sum(seg.active_size for seg in snapshot.segments), snapshot.total_activated
+    )

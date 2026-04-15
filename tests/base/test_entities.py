@@ -1,12 +1,21 @@
 import unittest
+
 from memsnapdump.base import (
-    Frame,
-    TraceEntry,
     Block,
     BlockState,
-    Segment,
     DeviceSnapshot,
+    Frame,
+    Segment,
+    TraceEntry,
 )
+from memsnapdump.simulate.snapshot_lookup import (
+    find_block,
+    find_overlapping_segment,
+    find_segment,
+    is_valid_sub_block,
+)
+
+# range lookup helpers are tested via returned (idx, object) tuples
 
 
 class TestFrame(unittest.TestCase):
@@ -140,12 +149,12 @@ class TestBlock(unittest.TestCase):
 
     def test_valid_sub_block(self):
         block = Block(size=1024, address=0x1000)
-        self.assertTrue(block.valid_sub_block(0x1000, 512))
-        self.assertTrue(block.valid_sub_block(0x1200, 512))
-        self.assertTrue(block.valid_sub_block(0x1000, 1024))
-        self.assertFalse(block.valid_sub_block(0x900, 512))
-        self.assertFalse(block.valid_sub_block(0x1400, 512))
-        self.assertFalse(block.valid_sub_block(0x1000, 2048))
+        self.assertTrue(is_valid_sub_block(block, 0x1000, 512))
+        self.assertTrue(is_valid_sub_block(block, 0x1200, 512))
+        self.assertTrue(is_valid_sub_block(block, 0x1000, 1024))
+        self.assertFalse(is_valid_sub_block(block, 0x900, 512))
+        self.assertFalse(is_valid_sub_block(block, 0x1400, 512))
+        self.assertFalse(is_valid_sub_block(block, 0x1000, 2048))
 
     def test_to_dict(self):
         block = Block(
@@ -248,20 +257,34 @@ class TestSegment(unittest.TestCase):
         segment = Segment.build_from_event(event)
         self.assertTrue(segment.is_expandable)
 
-    def test_find_block_idx_by_block_addr(self):
+    def test_find_block_returns_idx_and_object(self):
         segment = Segment(address=0x10000, total_size=8192)
         segment.blocks = [
             Block(size=2048, address=0x10000),
             Block(size=2048, address=0x10800),
             Block(size=4096, address=0x11000),
         ]
-        self.assertEqual(segment.find_block_idx_by_block_addr(0x10000), 0)
-        self.assertEqual(segment.find_block_idx_by_block_addr(0x10800), 1)
-        self.assertEqual(segment.find_block_idx_by_block_addr(0x11000), 2)
-        self.assertEqual(segment.find_block_idx_by_block_addr(0x10500), 0)
-        self.assertEqual(segment.find_block_idx_by_block_addr(0x11500), 2)
-        self.assertEqual(segment.find_block_idx_by_block_addr(0x9000), -1)
-        self.assertEqual(segment.find_block_idx_by_block_addr(0x13000), -1)
+        block_idx, block = find_block(segment, 0x10000)
+        self.assertEqual(block_idx, 0)
+        self.assertIs(block, segment.blocks[0])
+        block_idx, block = find_block(segment, 0x10800)
+        self.assertEqual(block_idx, 1)
+        self.assertIs(block, segment.blocks[1])
+        block_idx, block = find_block(segment, 0x11000)
+        self.assertEqual(block_idx, 2)
+        self.assertIs(block, segment.blocks[2])
+        block_idx, block = find_block(segment, 0x10500)
+        self.assertEqual(block_idx, 0)
+        self.assertIs(block, segment.blocks[0])
+        block_idx, block = find_block(segment, 0x11500)
+        self.assertEqual(block_idx, 2)
+        self.assertIs(block, segment.blocks[2])
+        block_idx, block = find_block(segment, 0x9000)
+        self.assertEqual(block_idx, -1)
+        self.assertIsNone(block)
+        block_idx, block = find_block(segment, 0x13000)
+        self.assertEqual(block_idx, -1)
+        self.assertIsNone(block)
 
     def test_to_dict(self):
         segment = Segment(
@@ -341,46 +364,69 @@ class TestDeviceSnapshot(unittest.TestCase):
         self.assertEqual(snapshot.trace_entries[0].idx, 0)
         self.assertEqual(snapshot.trace_entries[1].idx, 1)
 
-    def test_find_segment_idx_by_addr(self):
+    def test_find_overlapping_segment_returns_idx_and_matches_containing_segment(self):
         snapshot = DeviceSnapshot()
         snapshot.segments = [
             Segment(address=0x10000, total_size=0x2000),
             Segment(address=0x20000, total_size=0x5000),
             Segment(address=0x30000, total_size=0x1000),
         ]
-        self.assertEqual(snapshot.find_segment_idx_by_addr(0x10000), 0)
-        self.assertEqual(snapshot.find_segment_idx_by_addr(0x12000), -1)
-        self.assertEqual(snapshot.find_segment_idx_by_addr(0x20000), 1)
-        self.assertEqual(snapshot.find_segment_idx_by_addr(0x25000), -1)
-        self.assertEqual(snapshot.find_segment_idx_by_addr(0x30000), 2)
-        self.assertEqual(snapshot.find_segment_idx_by_addr(0x9000), -1)
-        self.assertEqual(snapshot.find_segment_idx_by_addr(0x40000), -1)
+        seg_idx, seg = find_overlapping_segment(snapshot, 0x10000)
+        self.assertEqual(seg_idx, 0)
+        self.assertIs(seg, snapshot.segments[0])
+        seg_idx, seg = find_overlapping_segment(snapshot, 0x12000)
+        self.assertEqual(seg_idx, -1)
+        self.assertIsNone(seg)
+        seg_idx, seg = find_overlapping_segment(snapshot, 0x20000)
+        self.assertEqual(seg_idx, 1)
+        self.assertIs(seg, snapshot.segments[1])
+        seg_idx, seg = find_overlapping_segment(snapshot, 0x25000)
+        self.assertEqual(seg_idx, -1)
+        self.assertIsNone(seg)
+        seg_idx, seg = find_overlapping_segment(snapshot, 0x30000)
+        self.assertEqual(seg_idx, 2)
+        self.assertIs(seg, snapshot.segments[2])
+        seg_idx, seg = find_overlapping_segment(snapshot, 0x9000)
+        self.assertEqual(seg_idx, -1)
+        self.assertIsNone(seg)
+        seg_idx, seg = find_overlapping_segment(snapshot, 0x40000)
+        self.assertEqual(seg_idx, -1)
+        self.assertIsNone(seg)
 
-    def test_find_segment_idx_by_addr_with_stream(self):
-        # 测试不同 stream 地址重叠的场景
+    def test_find_overlapping_segment_returns_idx_and_matches_stream_filtered_segment(
+        self,
+    ):
         snapshot = DeviceSnapshot()
-        # 按 (address, stream) 排序
         snapshot.segments = [
             Segment(address=0x10000, total_size=0x2000, stream=0),
             Segment(address=0x10000, total_size=0x3000, stream=1),
             Segment(address=0x20000, total_size=0x5000, stream=0),
             Segment(address=0x30000, total_size=0x1000, stream=1),
         ]
-        # 不指定 stream 时，按地址范围匹配，返回某个满足条件的（向后兼容）
-        result = snapshot.find_segment_idx_by_addr(0x10000)
-        self.assertIn(result, [0, 1])  # 可能返回 stream=0 或 stream=1 的
-        # 指定 stream=0 时
-        self.assertEqual(snapshot.find_segment_idx_by_addr(0x10000, stream=0), 0)
-        # 指定 stream=1 时
-        self.assertEqual(snapshot.find_segment_idx_by_addr(0x10000, stream=1), 1)
-        # 指定不存在的 stream
-        self.assertEqual(snapshot.find_segment_idx_by_addr(0x10000, stream=2), -1)
-        # 地址范围匹配但指定不同 stream
-        self.assertEqual(snapshot.find_segment_idx_by_addr(0x20000, stream=0), 2)
-        self.assertEqual(snapshot.find_segment_idx_by_addr(0x20000, stream=1), -1)
-        # stream=1 的 segment 范围测试
-        self.assertEqual(snapshot.find_segment_idx_by_addr(0x11000, stream=1), 1)
-        self.assertEqual(snapshot.find_segment_idx_by_addr(0x30000, stream=1), 3)
+        result_idx, result_seg = find_overlapping_segment(snapshot, 0x10000)
+        self.assertIn(result_idx, [0, 1])
+        self.assertIsNotNone(result_seg)
+        seg_idx, seg = find_overlapping_segment(snapshot, 0x10000, stream=0)
+        self.assertEqual(seg_idx, 0)
+        self.assertIs(seg, snapshot.segments[0])
+        seg_idx, seg = find_overlapping_segment(snapshot, 0x10000, stream=1)
+        self.assertEqual(seg_idx, 1)
+        self.assertIs(seg, snapshot.segments[1])
+        seg_idx, seg = find_overlapping_segment(snapshot, 0x10000, stream=2)
+        self.assertEqual(seg_idx, -1)
+        self.assertIsNone(seg)
+        seg_idx, seg = find_overlapping_segment(snapshot, 0x20000, stream=0)
+        self.assertEqual(seg_idx, 2)
+        self.assertIs(seg, snapshot.segments[2])
+        seg_idx, seg = find_overlapping_segment(snapshot, 0x20000, stream=1)
+        self.assertEqual(seg_idx, -1)
+        self.assertIsNone(seg)
+        seg_idx, seg = find_overlapping_segment(snapshot, 0x11000, stream=1)
+        self.assertEqual(seg_idx, 1)
+        self.assertIs(seg, snapshot.segments[1])
+        exact_idx, exact_seg = find_segment(snapshot, 0x30000, stream=1)
+        self.assertEqual(exact_idx, 3)
+        self.assertIs(exact_seg, snapshot.segments[3])
 
     def test_to_dict(self):
         snapshot_dict = {"segments": [], "device_traces": [[]]}

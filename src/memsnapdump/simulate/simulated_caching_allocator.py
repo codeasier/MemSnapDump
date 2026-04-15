@@ -5,7 +5,7 @@ from memsnapdump.util import get_logger
 
 from .allocator_context import AllocatorContext
 from .allocator_hook_dispatcher import AllocatorHookDispatcher
-from . import range_ops, snapshot_mutator
+from . import snapshot_lookup, snapshot_mutator
 
 allocator_logger = get_logger("ALLOCATOR")
 
@@ -27,7 +27,7 @@ class SimulatedCachingAllocator:
         :param new_block: 待分配的block
         """
         _error = "Failed to simulate alloc block"
-        gap_result = range_ops.find_gap_for_alloc_block(
+        gap_result = snapshot_lookup.find_gap_for_alloc_block(
             self.ctx.device_snapshot,
             new_block.address,
             new_block.size,
@@ -61,18 +61,16 @@ class SimulatedCachingAllocator:
         :param alloc_event: 待回滚的alloc事件
         """
         _error = "Failed to simulate free block"
-        seg_idx = self.ctx.device_snapshot.find_segment_idx_by_addr(
-            alloc_event.addr, alloc_event.stream
+        seg_idx, segment = snapshot_lookup.find_overlapping_segment(
+            self.ctx.device_snapshot, alloc_event.addr, alloc_event.stream
         )
-        if seg_idx == -1:
+        if seg_idx == -1 or segment is None:
             allocator_logger.error(
                 f"{_error}: cannot find segment for block (addr={alloc_event.addr})"
             )
             return False
-        exist_block = range_ops.find_block_by_addr(
-            self.ctx.device_snapshot, seg_idx, alloc_event.addr
-        )
-        if exist_block is None:
+        block_idx, exist_block = snapshot_lookup.find_block(segment, alloc_event.addr)
+        if block_idx == -1 or exist_block is None:
             # workspace场景容忍
             if self.ctx.workspace_flag:
                 allocator_logger.warning(
@@ -104,18 +102,20 @@ class SimulatedCachingAllocator:
         :param free_requested_event: 待回放的free_requested请求
         """
         _error = "Failed to simulate active block"
-        seg_idx = self.ctx.device_snapshot.find_segment_idx_by_addr(
-            free_requested_event.addr, free_requested_event.stream
+        seg_idx, segment = snapshot_lookup.find_overlapping_segment(
+            self.ctx.device_snapshot,
+            free_requested_event.addr,
+            free_requested_event.stream,
         )
-        if seg_idx == -1:
+        if seg_idx == -1 or segment is None:
             allocator_logger.error(
                 f"{_error}: cannot find segment for block (addr={free_requested_event.addr})"
             )
             return False
-        active_pending_free_block = range_ops.find_block_by_addr(
-            self.ctx.device_snapshot, seg_idx, free_requested_event.addr
+        block_idx, active_pending_free_block = snapshot_lookup.find_block(
+            segment, free_requested_event.addr
         )
-        if active_pending_free_block is None:
+        if block_idx == -1 or active_pending_free_block is None:
             allocator_logger.error(
                 f"{_error}: cannot find block (addr={free_requested_event.addr})"
             )
@@ -179,34 +179,14 @@ class SimulatedCachingAllocator:
             )
             return True
         virtual_map_segment = copy.deepcopy(new_segment)
-        if left_adjacent_idx != -1:
-            if not snapshot_mutator.merge_mapped_segment(
-                self.ctx.device_snapshot,
-                new_segment,
-                left_adjacent_idx,
-                right_adjacent_idx,
-            ):
-                allocator_logger.error(f"{_error}: failed to merge right segment")
-                return False
-        else:
-            range_ops.insert_segment_sorted(self.ctx.device_snapshot, new_segment)
-            new_idx = segments.index(new_segment)
-            # 插入后右相邻索引后移一位，重新计算以保持健壮性
-            corrected_right_idx = new_idx + 1
-            if (
-                corrected_right_idx < len(segments)
-                and segments[corrected_right_idx].address == new_seg_end
-            ):
-                if not range_ops.merge_segments(
-                    self.ctx.device_snapshot, new_idx, corrected_right_idx
-                ):
-                    allocator_logger.error(f"{_error}: failed to merge right segment")
-                    return False
-            else:
-                allocator_logger.error(
-                    f"{_error}: right adjacent segment not found after insert (expected addr={new_seg_end})"
-                )
-                return False
+        if not snapshot_mutator.merge_mapped_segment(
+            self.ctx.device_snapshot,
+            new_segment,
+            left_adjacent_idx,
+            right_adjacent_idx,
+        ):
+            allocator_logger.error(f"{_error}: failed to merge adjacent segments")
+            return False
         snapshot_mutator.increase_reserved(
             self.ctx.device_snapshot, virtual_map_segment.total_size
         )
@@ -222,10 +202,10 @@ class SimulatedCachingAllocator:
         """
         _error = "Free segment failed"
         seg_addr = alloc_seg_event.addr
-        exist_seg = range_ops.find_segment_by_exact_addr(
+        exist_seg_idx, exist_seg = snapshot_lookup.find_segment(
             self.ctx.device_snapshot, seg_addr, alloc_seg_event.stream
         )
-        if exist_seg is None:
+        if exist_seg_idx == -1 or exist_seg is None:
             allocator_logger.error(
                 f"{_error}: cannot found segment(addr={seg_addr}, stream={alloc_seg_event.stream})"
             )
@@ -262,13 +242,12 @@ class SimulatedCachingAllocator:
         virtual_free_segment = Segment.build_from_event(map_event)
         seg_addr = virtual_free_segment.address
         unmap_size = virtual_free_segment.total_size
-        exist_seg_idx = self.ctx.device_snapshot.find_segment_idx_by_addr(
-            seg_addr, map_event.stream
+        exist_seg_idx, exist_seg = snapshot_lookup.find_overlapping_segment(
+            self.ctx.device_snapshot, seg_addr, map_event.stream
         )
-        if exist_seg_idx < 0 or exist_seg_idx >= len(segments):
+        if exist_seg_idx < 0 or exist_seg is None or exist_seg_idx >= len(segments):
             allocator_logger.error(f"{_error}: cannot found segment(addr={seg_addr})")
             return False
-        exist_seg = segments[exist_seg_idx]
         virtual_free_segment.free_or_unmap_event_idx = exist_seg.free_or_unmap_event_idx
         virtual_free_segment.alloc_or_map_event_idx = map_event.idx
         if not (

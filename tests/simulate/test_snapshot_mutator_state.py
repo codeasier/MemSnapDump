@@ -4,10 +4,10 @@ from memsnapdump.base import DeviceSnapshot, Segment, Block, BlockState, TraceEn
 from memsnapdump.simulate.allocator_context import AllocatorContext
 from memsnapdump.simulate.simulated_caching_allocator import SimulatedCachingAllocator
 from memsnapdump.simulate import snapshot_mutator
-from tests.common import valid_segment
+from tests.common import valid_segment, valid_snapshot
 
 
-class TestAllocatorStateConsistency(unittest.TestCase):
+class TestSnapshotMutatorState(unittest.TestCase):
 
     @staticmethod
     def make_snapshot(
@@ -78,6 +78,7 @@ class TestAllocatorStateConsistency(unittest.TestCase):
         self.assertEqual(0x100, segment.allocated_size)
         self.assertEqual(0x100, snapshot.total_activated)
         self.assertEqual(0x100, snapshot.total_allocated)
+        valid_snapshot(snapshot, self)
 
         self.assertTrue(snapshot_mutator.detach_block(snapshot, block))
         self.assertIsNone(block.segment_ptr)
@@ -86,6 +87,7 @@ class TestAllocatorStateConsistency(unittest.TestCase):
         self.assertEqual(0, segment.allocated_size)
         self.assertEqual(0, snapshot.total_activated)
         self.assertEqual(0, snapshot.total_allocated)
+        valid_snapshot(snapshot, self)
 
     def test_insert_and_remove_segment_keep_reserved_consistent(self):
         snapshot = self.make_snapshot([])
@@ -95,11 +97,13 @@ class TestAllocatorStateConsistency(unittest.TestCase):
 
         self.assertEqual(1, len(snapshot.segments))
         self.assertEqual(0x400, snapshot.total_reserved)
+        valid_snapshot(snapshot, self)
 
         snapshot_mutator.remove_segment(snapshot, segment)
 
         self.assertEqual([], snapshot.segments)
         self.assertEqual(0, snapshot.total_reserved)
+        valid_snapshot(snapshot, self)
 
     def test_alloc_block_updates_segment_and_snapshot_totals(self):
         segment = self.make_segment(0x1000, 0x1000)
@@ -119,6 +123,7 @@ class TestAllocatorStateConsistency(unittest.TestCase):
         self.assertEqual(7, new_block.free_event_idx)
         self.assertIs(new_block.segment_ptr, segment)
         valid_segment(segment, self)
+        valid_snapshot(allocator.ctx.device_snapshot, self)
 
     def test_free_block_updates_segment_and_snapshot_totals(self):
         block = self.make_block(0x1200, 0x100)
@@ -134,6 +139,7 @@ class TestAllocatorStateConsistency(unittest.TestCase):
         self.assertEqual(0, segment.allocated_size)
         self.assertEqual(0, allocator.ctx.device_snapshot.total_activated)
         self.assertEqual(0, allocator.ctx.device_snapshot.total_allocated)
+        valid_snapshot(allocator.ctx.device_snapshot, self)
 
     def test_active_block_promotes_pending_free_block(self):
         block = self.make_block(0x1200, 0x100, state=BlockState.ACTIVE_PENDING_FREE)
@@ -148,6 +154,7 @@ class TestAllocatorStateConsistency(unittest.TestCase):
         self.assertEqual(0x100, segment.allocated_size)
         self.assertEqual(0x100, allocator.ctx.device_snapshot.total_allocated)
         valid_segment(segment, self)
+        valid_snapshot(allocator.ctx.device_snapshot, self)
 
     def test_workspace_flag_tolerates_missing_block_on_free(self):
         segment = self.make_segment(0x1000, 0x1000)
@@ -160,6 +167,7 @@ class TestAllocatorStateConsistency(unittest.TestCase):
         self.assertTrue(tolerated)
         self.assertEqual(0, allocator.ctx.device_snapshot.total_allocated)
         self.assertEqual(0, allocator.ctx.device_snapshot.total_activated)
+        valid_snapshot(allocator.ctx.device_snapshot, self)
 
     def test_alloc_or_map_segment_updates_reserved_for_non_merge(self):
         allocator = self.make_allocator([])
@@ -174,7 +182,34 @@ class TestAllocatorStateConsistency(unittest.TestCase):
         self.assertEqual(1, len(allocator.ctx.device_snapshot.segments))
         self.assertEqual(0x400, allocator.ctx.device_snapshot.total_reserved)
         self.assertEqual(5, segment.free_or_unmap_event_idx)
+        valid_snapshot(allocator.ctx.device_snapshot, self)
+
+    def test_alloc_or_map_segment_merge_keeps_snapshot_invariants(self):
+        left = self.make_segment(0x1000, 0x100)
+        allocator = self.make_allocator([left])
+        allocator.ctx.set_current_undo_event(
+            self.make_event("segment_free", 0x1100, 0x80, idx=9)
+        )
+        new_segment = self.make_segment(0x1100, 0x80)
+
+        allocated = allocator.alloc_or_map_segment(new_segment, merge=True)
+
+        self.assertTrue(allocated)
+        self.assertEqual(1, len(allocator.ctx.device_snapshot.segments))
+        self.assertEqual(0x180, allocator.ctx.device_snapshot.total_reserved)
+        valid_snapshot(allocator.ctx.device_snapshot, self)
+
+    def test_unmap_segment_keeps_snapshot_invariants(self):
+        segment = self.make_segment(0x1000, 0x200)
+        allocator = self.make_allocator([segment])
+        map_event = self.make_event("segment_map", 0x1000, 0x80, idx=10)
+
+        unmapped = allocator.unmap_segment(map_event)
+
+        self.assertTrue(unmapped)
+        self.assertEqual(0x180, allocator.ctx.device_snapshot.total_reserved)
+        valid_snapshot(allocator.ctx.device_snapshot, self)
 
 
 if __name__ == "__main__":
-    unittest.main(verbosity=2, module="test_snapshot_mutator")
+    unittest.main(verbosity=2, module="test_snapshot_mutator_state")

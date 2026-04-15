@@ -5,6 +5,7 @@ from pathlib import Path
 from memsnapdump.base import Block, BlockState, DeviceSnapshot, TraceEntry
 from memsnapdump.simulate import SimulateDeviceSnapshot, SimulateHooker
 from memsnapdump.simulate.hooker_defs import AllocatorHooker
+from memsnapdump.simulate.snapshot_lookup import find_overlapping_segment
 from memsnapdump.util.file_util import load_pickle_to_dict
 from memsnapdump.util.logger import restore_logs, suppress_logs
 from tests.common import valid_segments
@@ -46,11 +47,10 @@ class ReplayBlockHooker(AllocatorHooker):
     ):
         super().pre_replay_alloc_block(wait4alloc_block, current_snapshot)
         self.test_util.assertNotEqual(wait4alloc_block.state, BlockState.INACTIVE)
-        _segment_idx = current_snapshot.find_segment_idx_by_addr(
-            wait4alloc_block.address
+        _segment_idx, self._segment = find_overlapping_segment(
+            current_snapshot, wait4alloc_block.address
         )
         self.test_util.assertTrue(0 <= _segment_idx < len(current_snapshot.segments))
-        self._segment = current_snapshot.segments[_segment_idx]
         self.pre_seg_allocated_size = self._segment.allocated_size
         self.pre_seg_active_size = self._segment.active_size
         self.pre_snapshot_total_allocated_size = current_snapshot.total_allocated

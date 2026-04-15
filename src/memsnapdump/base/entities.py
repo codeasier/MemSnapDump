@@ -148,9 +148,6 @@ class Block:
         )
         return block
 
-    def valid_sub_block(self, addr, size):
-        return self.address <= addr and addr + size <= self.address + self.size
-
     def to_dict(self):
         return dict(
             size=self.size,
@@ -248,19 +245,6 @@ class Segment:
             blocks=[block.to_dict() for block in self.blocks],
         )
 
-    def find_block_idx_by_block_addr(self, block_addr: int):
-        left = 0
-        right = len(self.blocks) - 1
-        while left <= right:
-            mid = (left + right) // 2
-            if block_addr < self.blocks[mid].address:
-                right = mid - 1
-            elif block_addr >= self.blocks[mid].address + self.blocks[mid].size:
-                left = mid + 1
-            else:
-                return mid
-        return -1
-
 
 class DeviceSnapshot:
     segments: List[Segment]
@@ -316,31 +300,3 @@ class DeviceSnapshot:
             "device_traces": [[] for _ in range(self.device)]
             + [[trace.to_dict() for trace in self.trace_entries]],
         }
-
-    def find_segment_idx_by_addr(self, addr: int, stream: int = None) -> int:
-        left = 0
-        segments = self.segments
-        right = len(segments) - 1
-        while left <= right:
-            mid = (left + right) // 2
-            if addr < segments[mid].address:
-                right = mid - 1
-            elif addr >= segments[mid].address + segments[mid].total_size:
-                left = mid + 1
-            else:
-                # 地址范围内，如果指定了 stream 还需验证 stream 匹配
-                if stream is not None and segments[mid].stream != stream:
-                    # 同地址按 stream 升序排列，根据大小关系确定搜索方向和 range
-                    step = -1 if stream < segments[mid].stream else 1
-                    end = -1 if step == -1 else len(segments)
-                    for i in range(mid + step, end, step):
-                        if addr < segments[i].address:
-                            break
-                        if (
-                            addr < segments[i].address + segments[i].total_size
-                            and segments[i].stream == stream
-                        ):
-                            return i
-                    return -1
-                return mid
-        return -1

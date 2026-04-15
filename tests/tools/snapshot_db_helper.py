@@ -1,7 +1,9 @@
 import bisect
 import sqlite3
 from typing import List
+
 from memsnapdump.base import Segment, Block, TraceEntry
+from memsnapdump.simulate.snapshot_lookup import find_overlapping_segment
 from memsnapdump.tools.adaptors.database import (
     TRACE_ENTRY_ACTION_VALUE_MAP,
     BLOCK_STATE_VALUE_MAP,
@@ -74,37 +76,9 @@ class SnapshotDbHandler:
 
     @staticmethod
     def find_segment_idx_by_addr(segments, addr: int, stream: int = None) -> int:
-        left = 0
-        right = len(segments) - 1
-        while left <= right:
-            mid = (left + right) // 2
-            if addr < segments[mid].address:
-                right = mid - 1
-            elif addr >= segments[mid].address + segments[mid].total_size:
-                left = mid + 1
-            else:
-                # 地址范围内，如果指定了 stream 还需验证 stream 匹配
-                if stream is not None and segments[mid].stream != stream:
-                    # 同地址可能存在多个不同 stream 的 segment，需要线性搜索
-                    for i in range(mid, -1, -1):
-                        if addr < segments[i].address:
-                            break
-                        if (
-                            addr < segments[i].address + segments[i].total_size
-                            and segments[i].stream == stream
-                        ):
-                            return i
-                    for i in range(mid + 1, len(segments)):
-                        if addr < segments[i].address:
-                            break
-                        if (
-                            addr < segments[i].address + segments[i].total_size
-                            and segments[i].stream == stream
-                        ):
-                            return i
-                    return -1
-                return mid
-        return -1
+        snapshot = type("SnapshotLike", (), {"segments": segments})()
+        seg_idx, _ = find_overlapping_segment(snapshot, addr, stream)
+        return seg_idx
 
     @staticmethod
     def build_segments_by_events(events: List[TraceEntry]):
