@@ -12,10 +12,26 @@ MemSnapDump 是一个用于回放、切片和导出 `torch` / `torch_npu` 内存
 ## 安装
 
 ```bash
+pip install memsnapdump
+```
+
+用于开发：
+
+```bash
 python -m pip install -e .[dev]
 ```
 
 ## 快速开始
+
+查看可用命令：
+
+```bash
+memsnapdump -h
+memsnapdump --help
+memsnapdump --version
+memsnapdump split -h
+memsnapdump dump2db -h
+```
 
 ### 在 Python 中回放快照
 
@@ -31,13 +47,13 @@ snapshot.replay()
 ### 切分大型快照
 
 ```bash
-python -m memsnapdump.tools.split /data/snapshot.pickle --slices 4
+memsnapdump split /data/snapshot.pickle --slices 4
 ```
 
 ### 导出快照到 SQLite
 
 ```bash
-python -m memsnapdump.tools.dump2db /data/snapshot.pickle -o /data/output
+memsnapdump dump2db /data/snapshot.pickle -o /data/output
 ```
 
 ## 文档导航

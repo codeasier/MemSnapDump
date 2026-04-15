@@ -11,10 +11,11 @@ from memsnapdump.util.file_util import (
 from memsnapdump.simulate import SimulateDeviceSnapshot
 from .hooker import SliceDumpHooker
 
+
 dump_logger = get_logger("DUMP")
 
 
-def get_args():
+def get_args(argv=None):
     parser = argparse.ArgumentParser(
         description="This script is used for memory snapshot output files(typically in "
         "pickle format captured by torch/torch_npu."
@@ -68,7 +69,7 @@ def get_args():
         default="pkl",
         help="Specify output dump file format; must be either 'pkl' or 'json' (default: pkl).",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     # 校验snapshot path
     if not (args.snapshot_file and check_file_valid(args.snapshot_file)):
         raise argparse.ArgumentError(
@@ -87,38 +88,57 @@ def get_args():
     return args
 
 
-def slice_dump():
-    args = get_args()
+def run_slice_dump(
+    snapshot_file: str,
+    device: int = 0,
+    slices: int = 4,
+    max_entries: int = 15000,
+    dump_dir: str = "",
+    dump_type: str = "pkl",
+):
+    resolved_dump_dir = dump_dir or os.path.dirname(snapshot_file)
     dump_logger.info(
-        f"Start to dump snapshot slice, reading pickle file '{args.snapshot_file}'."
+        f"Start to dump snapshot slice, reading pickle file '{snapshot_file}'."
     )
-    df = load_pickle_to_dict(Path(args.snapshot_file))
+    df = load_pickle_to_dict(Path(snapshot_file))
     if "segments" not in df or "device_traces" not in df or not df["device_traces"]:
         dump_logger.warning(
             "Snapshot files with no event records cannot be replayed or split. You may have disabled "
             "history event recoding during collection."
         )
         return
-    if len(df["device_traces"]) <= args.device or not df["device_traces"][args.device]:
+    if len(df["device_traces"]) <= device or not df["device_traces"][device]:
         dump_logger.warning(
-            f"The snapshot file did not record any event data for the specified device {args.device}."
+            f"The snapshot file did not record any event data for the specified device {device}."
         )
         return
     dump_logger.info(
         f"Start loading snapshot with {len(df['segments'])} segments, "
-        f"{len(df['device_traces'][args.device])} events"
+        f"{len(df['device_traces'][device])} events"
     )
-    snapshot = SimulateDeviceSnapshot(df, args.device)
+    snapshot = SimulateDeviceSnapshot(df, device)
     dump_logger.info("Successfully loaded snapshot, starting to replay and dump.")
     slice_dump_hooker = SliceDumpHooker(
-        dump_dir=args.dump_dir,
-        num_of_slices=args.slices,
-        max_entries=args.max_entries,
-        dump_type=args.dump_type,
+        dump_dir=resolved_dump_dir,
+        num_of_slices=slices,
+        max_entries=max_entries,
+        dump_type=dump_type,
     )
     snapshot.register_hooker(slice_dump_hooker)
     snapshot.replay()
     dump_logger.info("Successfully replay and dump snapshot.")
+
+
+def slice_dump(argv=None):
+    args = get_args(argv)
+    return run_slice_dump(
+        snapshot_file=args.snapshot_file,
+        device=args.device,
+        slices=args.slices,
+        max_entries=args.max_entries,
+        dump_dir=args.dump_dir,
+        dump_type=args.dump_type,
+    )
 
 
 if __name__ == "__main__":

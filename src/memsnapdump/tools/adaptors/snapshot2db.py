@@ -173,7 +173,7 @@ def dump(pickle_file: str, dump_file: str, device=None) -> bool:
     return True
 
 
-def get_args():
+def get_args(argv=None):
     parser = argparse.ArgumentParser(
         description="This script is used to parse and convert snapshot data into a database "
         "format that is more convenient for visualization."
@@ -208,7 +208,7 @@ def get_args():
         help="Specify the device id to dump. If not provided, "
         "we will dump the data of all devices.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     snapshot_path = Path(args.snapshot_file)
     # 校验snapshot path
     if not snapshot_path.is_file() or not os.access(args.snapshot_file, os.R_OK):
@@ -233,22 +233,40 @@ def get_args():
     return args
 
 
+def run_dump_to_db(
+    snapshot_file: str,
+    dump_dir: str = "",
+    device: int | None = None,
+    log_file: str = "",
+) -> bool:
+    resolved_dump_dir = dump_dir or str(Path(snapshot_file).parent)
+    if log_file:
+        set_global_log_file(log_file)
+
+    return dump(
+        snapshot_file,
+        Path(resolved_dump_dir) / f"{Path(snapshot_file).name}.db",
+        device,
+    )
+
+
 class ExistCode:
     SUCCESS = 0
     FAILED = -1
 
 
 @timer(name="Dump snapshot to database.", logger=dump_logger)
-def main():
+def main(argv=None):
     try:
-        args = get_args()
+        args = get_args(argv)
     except argparse.ArgumentError as e:
         dump_logger.error("Failed to parse arguments: {}".format(e))
         sys.exit(ExistCode.FAILED)
-    if not dump(
-        args.snapshot_file,
-        Path(args.dump_dir) / f"{Path(args.snapshot_file).name}.db",
-        args.device,
+    if not run_dump_to_db(
+        snapshot_file=args.snapshot_file,
+        dump_dir=str(args.dump_dir),
+        device=args.device,
+        log_file=args.log,
     ):
         dump_logger.error("Failed to dump the snapshot to database.")
         sys.exit(ExistCode.FAILED)

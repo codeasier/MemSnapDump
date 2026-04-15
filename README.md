@@ -12,10 +12,26 @@ MemSnapDump is a toolkit for replaying, slicing, and exporting memory snapshots 
 ## Installation
 
 ```bash
+pip install memsnapdump
+```
+
+For development:
+
+```bash
 python -m pip install -e .[dev]
 ```
 
 ## Quick start
+
+Check the available commands:
+
+```bash
+memsnapdump -h
+memsnapdump --help
+memsnapdump --version
+memsnapdump split -h
+memsnapdump dump2db -h
+```
 
 ### Replay a snapshot in Python
 
@@ -31,13 +47,13 @@ snapshot.replay()
 ### Split a large snapshot
 
 ```bash
-python -m memsnapdump.tools.split /data/snapshot.pickle --slices 4
+memsnapdump split /data/snapshot.pickle --slices 4
 ```
 
 ### Export a snapshot to SQLite
 
 ```bash
-python -m memsnapdump.tools.dump2db /data/snapshot.pickle -o /data/output
+memsnapdump dump2db /data/snapshot.pickle -o /data/output
 ```
 
 ## Documentation
