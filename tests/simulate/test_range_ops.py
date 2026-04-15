@@ -24,17 +24,21 @@ class TestRangeOps(unittest.TestCase):
         snapshot.device = 0
         return snapshot
 
-
     @staticmethod
-    def make_segment(address: int, total_size: int, stream: int = 0, blocks: list[Block] | None = None) -> Segment:
+    def make_segment(
+        address: int,
+        total_size: int,
+        stream: int = 0,
+        blocks: list[Block] | None = None,
+    ) -> Segment:
         segment = Segment(
             address=address,
             total_size=total_size,
             stream=stream,
-            segment_type='large',
+            segment_type="large",
             allocated_size=0,
             active_size=0,
-            blocks=[]
+            blocks=[],
         )
         for block in blocks or []:
             block.segment_ptr = segment
@@ -45,21 +49,17 @@ class TestRangeOps(unittest.TestCase):
         return segment
 
     @staticmethod
-    def make_block(address: int, size: int, state: str = BlockState.ACTIVE_ALLOCATED) -> Block:
-        return Block(
-            size=size,
-            requested_size=size,
-            address=address,
-            state=state
-        )
-
+    def make_block(
+        address: int, size: int, state: str = BlockState.ACTIVE_ALLOCATED
+    ) -> Block:
+        return Block(size=size, requested_size=size, address=address, state=state)
 
     def test_find_block_by_addr_returns_exact_block(self):
         block_a = self.make_block(0x1000, 0x100)
         block_b = self.make_block(0x1400, 0x80)
-        snapshot = self.make_snapshot([
-            self.make_segment(0x1000, 0x1000, blocks=[block_a, block_b])
-        ])
+        snapshot = self.make_snapshot(
+            [self.make_segment(0x1000, 0x1000, blocks=[block_a, block_b])]
+        )
 
         found = find_block_by_addr(snapshot, 0, 0x1400)
 
@@ -69,9 +69,9 @@ class TestRangeOps(unittest.TestCase):
     def test_find_gap_for_alloc_block_returns_insert_position_between_blocks(self):
         block_a = self.make_block(0x1000, 0x100)
         block_b = self.make_block(0x1400, 0x100)
-        snapshot = self.make_snapshot([
-            self.make_segment(0x1000, 0x1000, blocks=[block_a, block_b])
-        ])
+        snapshot = self.make_snapshot(
+            [self.make_segment(0x1000, 0x1000, blocks=[block_a, block_b])]
+        )
 
         gap = find_gap_for_alloc_block(snapshot, 0x1200, 0x100, stream=0)
 
@@ -114,9 +114,15 @@ class TestRangeOps(unittest.TestCase):
         middle_left_block = self.make_block(0x1300, 0x100)
         overlap_block = self.make_block(0x1500, 0x200)
         right_block = self.make_block(0x1800, 0x100)
-        snapshot = self.make_snapshot([
-            self.make_segment(0x1000, 0x1000, blocks=[left_block, middle_left_block, overlap_block, right_block])
-        ])
+        snapshot = self.make_snapshot(
+            [
+                self.make_segment(
+                    0x1000,
+                    0x1000,
+                    blocks=[left_block, middle_left_block, overlap_block, right_block],
+                )
+            ]
+        )
 
         split = split_segment_at(snapshot, 0, 0x1400, 0x200)
 
@@ -133,12 +139,14 @@ class TestRangeOps(unittest.TestCase):
 
     def test_shrink_segment_left_recomputes_sizes_and_remaining_blocks(self):
         remain_alloc = self.make_block(0x1300, 0x100, state=BlockState.ACTIVE_ALLOCATED)
-        remain_pending = self.make_block(0x1500, 0x80, state=BlockState.ACTIVE_PENDING_FREE)
-        snapshot = self.make_snapshot([
-            self.make_segment(0x1000, 0x1000, blocks=[remain_alloc, remain_pending])
-        ])
+        remain_pending = self.make_block(
+            0x1500, 0x80, state=BlockState.ACTIVE_PENDING_FREE
+        )
+        snapshot = self.make_snapshot(
+            [self.make_segment(0x1000, 0x1000, blocks=[remain_alloc, remain_pending])]
+        )
 
-        shrunk = shrink_segment(snapshot, 0, 0x1000, 0x200, 'left')
+        shrunk = shrink_segment(snapshot, 0, 0x1000, 0x200, "left")
 
         self.assertTrue(shrunk)
         segment = snapshot.segments[0]

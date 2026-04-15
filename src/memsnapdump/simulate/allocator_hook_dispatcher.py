@@ -31,23 +31,33 @@ class AllocatorHookDispatcher:
         for hooker in self.hookers.values():
             hooker.pre_replay_free_block(block, snapshot)
 
-    def post_replay_free_block(self, block: Block, snapshot: DeviceSnapshot, use_copy: bool = False):
+    def post_replay_free_block(
+        self, block: Block, snapshot: DeviceSnapshot, use_copy: bool = False
+    ):
         payload = copy.copy(block) if use_copy else block
         for hooker in self.hookers.values():
             hooker.post_replay_free_block(payload, snapshot)
 
-    def pre_replay_map_or_alloc_segment(self, segment: Segment, snapshot: DeviceSnapshot):
+    def pre_replay_map_or_alloc_segment(
+        self, segment: Segment, snapshot: DeviceSnapshot
+    ):
         for hooker in self.hookers.values():
             hooker.pre_replay_map_or_alloc_segment(segment, snapshot)
 
-    def post_replay_map_or_alloc_segment(self, segment: Segment, snapshot: DeviceSnapshot):
+    def post_replay_map_or_alloc_segment(
+        self, segment: Segment, snapshot: DeviceSnapshot
+    ):
         for hooker in self.hookers.values():
             hooker.post_replay_map_or_alloc_segment(segment, snapshot)
 
-    def pre_replay_unmap_or_free_segment(self, segment: Segment, snapshot: DeviceSnapshot):
+    def pre_replay_unmap_or_free_segment(
+        self, segment: Segment, snapshot: DeviceSnapshot
+    ):
         for hooker in self.hookers.values():
             hooker.pre_replay_unmap_or_free_segment(segment, snapshot)
 
-    def post_replay_unmap_or_free_segment(self, segment: Segment, snapshot: DeviceSnapshot):
+    def post_replay_unmap_or_free_segment(
+        self, segment: Segment, snapshot: DeviceSnapshot
+    ):
         for hooker in self.hookers.values():
             hooker.post_replay_unmap_or_free_segment(segment, snapshot)

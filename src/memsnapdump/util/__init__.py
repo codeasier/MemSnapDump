@@ -6,4 +6,4 @@
 
 from .logger import get_logger, set_global_log_file
 
-__all__ = ['get_logger', 'set_global_log_file']
+__all__ = ["get_logger", "set_global_log_file"]

@@ -14,6 +14,7 @@ class TestLogger(unittest.TestCase):
         self.log_file = os.path.join(self.temp_dir, "test.log")
 
         from memsnapdump.util.logger import _global_log_file, _global_file_handler
+
         self.original_global_log_file = _global_log_file
         self.original_global_file_handler = _global_file_handler
 
@@ -149,4 +150,5 @@ class TestLogger(unittest.TestCase):
 
 if __name__ == "__main__":
     import unittest
+
     unittest.main(verbosity=2, module="test_logger")

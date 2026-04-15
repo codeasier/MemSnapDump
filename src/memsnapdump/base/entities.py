@@ -19,11 +19,11 @@ class Frame:
         return frame
 
     def to_dict(self):
-        return self._origin if self._origin else {
-            "filename": self.filename,
-            "line": self.line,
-            "name": self.name
-        }
+        return (
+            self._origin
+            if self._origin
+            else {"filename": self.filename, "line": self.line, "name": self.name}
+        )
 
 
 @dataclass
@@ -68,22 +68,34 @@ class TraceEntry:
             size=int(trace_dict["size"]),
             stream=int(trace_dict["stream"]),
             _origin=trace_dict,
-            frames=[Frame.from_dict(_frame_dict) for _frame_dict in trace_dict.get("frames", [])]
+            frames=[
+                Frame.from_dict(_frame_dict)
+                for _frame_dict in trace_dict.get("frames", [])
+            ],
         )
         return trace_entry
 
     def get_callstack(self):
         if not self.frames:
             return ""
-        return "\n".join([f"{frame.filename}:{frame.line} {frame.name}" for frame in self.frames[::-1]])
+        return "\n".join(
+            [
+                f"{frame.filename}:{frame.line} {frame.name}"
+                for frame in self.frames[::-1]
+            ]
+        )
 
     def to_dict(self):
-        return self._origin if self._origin else dict(
-            action=self.action,
-            addr=self.addr,
-            size=self.size,
-            stream=self.stream,
-            frames=[frame.to_dict() for frame in self.frames]
+        return (
+            self._origin
+            if self._origin
+            else dict(
+                action=self.action,
+                addr=self.addr,
+                size=self.size,
+                stream=self.stream,
+                frames=[frame.to_dict() for frame in self.frames],
+            )
         )
 
 
@@ -102,10 +114,13 @@ class Block:
     # size due to rounding
     address: int = -1
     state: Literal[
-        'active_allocated',  # used by a tensor
-        'active_pending_free',  # waiting for another stream to finish using this, then it will become free
-        'inactive'] = BlockState.INACTIVE  # free for reuse
-    frames: List[Frame] = field(default_factory=list)  # stack trace from where the allocation occurred
+        "active_allocated",  # used by a tensor
+        "active_pending_free",  # waiting for another stream to finish using this, then it will become free
+        "inactive",
+    ] = BlockState.INACTIVE  # free for reuse
+    frames: List[Frame] = field(
+        default_factory=list
+    )  # stack trace from where the allocation occurred
 
     # 指向持有该block的segment对象
     segment_ptr: Any = None
@@ -119,7 +134,7 @@ class Block:
             requested_size=block_dict["requested_size"],
             address=block_dict["address"],
             state=block_dict["state"],
-            frames=[Frame.from_dict(frame) for frame in block_dict.get("frames", [])]
+            frames=[Frame.from_dict(frame) for frame in block_dict.get("frames", [])],
         )
         return block
 
@@ -129,7 +144,7 @@ class Block:
             size=event.size,
             requested_size=event.size,
             address=event.addr,
-            frames=event.frames
+            frames=event.frames,
         )
         return block
 
@@ -142,7 +157,7 @@ class Block:
             requested_size=self.requested_size,
             address=self.address,
             state=self.state,
-            frames=[frame.to_dict() for frame in self.frames]
+            frames=[frame.to_dict() for frame in self.frames],
         )
 
 
@@ -157,7 +172,7 @@ class Segment:
     address: int = -1
     total_size: int = 0  # aclrtMalloc'd size of segment
     stream: int = 0
-    segment_type: Literal['small', 'large'] = ""  # 'large' (>1MB)
+    segment_type: Literal["small", "large"] = ""  # 'large' (>1MB)
     allocated_size: int = 0  # size of memory in use
     active_size: int = 0  # size of memory in use or in active_awaiting_free state
     blocks: List[Block] = field(default_factory=list)
@@ -177,10 +192,12 @@ class Segment:
             segment_type=segment_dict["segment_type"],
             allocated_size=segment_dict["allocated_size"],
             active_size=segment_dict["active_size"],
-            frames=[Frame.from_dict(_frame) for _frame in segment_dict.get("frames", [])],
+            frames=[
+                Frame.from_dict(_frame) for _frame in segment_dict.get("frames", [])
+            ],
             device=segment_dict.get("device", 0),
             _origin=segment_dict,
-            is_expandable=segment_dict.get("is_expandable", False)
+            is_expandable=segment_dict.get("is_expandable", False),
         )
         for block in segment_dict["blocks"]:
             if ignore_inactive_blocks and block["state"] == BlockState.INACTIVE:
@@ -197,18 +214,24 @@ class Segment:
             total_size=event.size,
             stream=event.stream,
             frames=event.frames,
-            device=event.device if hasattr(event, 'device') else 0,
+            device=event.device if hasattr(event, "device") else 0,
             allocated_size=0,
             active_size=0,
-            is_expandable=event.action in ['segment_map', 'segment_unmap']
+            is_expandable=event.action in ["segment_map", "segment_unmap"],
         )
-        segment.blocks = [] if not with_inactive_block else [Block(
-            size=event.size,
-            requested_size=event.size,
-            address=event.addr,
-            state=BlockState.INACTIVE,
-            segment_ptr=segment
-        )]
+        segment.blocks = (
+            []
+            if not with_inactive_block
+            else [
+                Block(
+                    size=event.size,
+                    requested_size=event.size,
+                    address=event.addr,
+                    state=BlockState.INACTIVE,
+                    segment_ptr=segment,
+                )
+            ]
+        )
         return segment
 
     def to_dict(self):
@@ -222,7 +245,7 @@ class Segment:
             device=self.device,
             is_expandable=self.is_expandable,
             frames=[frame.to_dict() for frame in self.frames],
-            blocks=[block.to_dict() for block in self.blocks]
+            blocks=[block.to_dict() for block in self.blocks],
         )
 
     def find_block_idx_by_block_addr(self, block_addr: int):
@@ -250,10 +273,14 @@ class DeviceSnapshot:
     device: int
 
     @classmethod
-    def from_dict(cls, snapshot_dict: dict, device: int, ignore_inactive_blocks: bool = False):
+    def from_dict(
+        cls, snapshot_dict: dict, device: int, ignore_inactive_blocks: bool = False
+    ):
         segments_dict = snapshot_dict.get("segments", [])
         device_traces = snapshot_dict.get("device_traces", [])
-        device_trace_list = device_traces[device] if 0 <= device <= len(device_traces) else []
+        device_trace_list = (
+            device_traces[device] if 0 <= device <= len(device_traces) else []
+        )
         snapshot = cls()
         snapshot.segments = []
         snapshot.trace_entries = []
@@ -266,7 +293,9 @@ class DeviceSnapshot:
             # 此时如果from_dict指定device为0或未指定而缺省为0，则未知归属的device也会纳入分析
             if segment_dict.get("device", 0) != device:
                 continue
-            _segment = Segment.from_dict(segment_dict, ignore_inactive_blocks=ignore_inactive_blocks)
+            _segment = Segment.from_dict(
+                segment_dict, ignore_inactive_blocks=ignore_inactive_blocks
+            )
             snapshot.segments.append(_segment)
             snapshot.total_allocated += _segment.allocated_size
             snapshot.total_reserved += _segment.total_size
@@ -282,9 +311,10 @@ class DeviceSnapshot:
 
     def to_dict(self):
         return {
-            'segments': [segment.to_dict() for segment in self.segments],
+            "segments": [segment.to_dict() for segment in self.segments],
             # 需要根据deviceId，将事件列表填入，如果deviceId不为0，前序还要padding空事件列表
-            'device_traces': [[] for _ in range(self.device)] + [[trace.to_dict() for trace in self.trace_entries]]
+            "device_traces": [[] for _ in range(self.device)]
+            + [[trace.to_dict() for trace in self.trace_entries]],
         }
 
     def find_segment_idx_by_addr(self, addr: int, stream: int = None) -> int:
@@ -306,7 +336,10 @@ class DeviceSnapshot:
                     for i in range(mid + step, end, step):
                         if addr < segments[i].address:
                             break
-                        if addr < segments[i].address + segments[i].total_size and segments[i].stream == stream:
+                        if (
+                            addr < segments[i].address + segments[i].total_size
+                            and segments[i].stream == stream
+                        ):
                             return i
                     return -1
                 return mid

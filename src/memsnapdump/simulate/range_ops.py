@@ -7,7 +7,9 @@ from memsnapdump.util import get_logger
 range_ops_logger = get_logger("ALLOCATOR")
 
 
-def find_segment_by_exact_addr(snapshot: DeviceSnapshot, addr: int, stream: int) -> Optional[Segment]:
+def find_segment_by_exact_addr(
+    snapshot: DeviceSnapshot, addr: int, stream: int
+) -> Optional[Segment]:
     seg_idx = snapshot.find_segment_idx_by_addr(addr, stream)
     if seg_idx != -1:
         seg = snapshot.segments[seg_idx]
@@ -16,7 +18,9 @@ def find_segment_by_exact_addr(snapshot: DeviceSnapshot, addr: int, stream: int)
     return None
 
 
-def find_block_by_addr(snapshot: DeviceSnapshot, seg_idx: int, block_addr: int) -> Optional[Block]:
+def find_block_by_addr(
+    snapshot: DeviceSnapshot, seg_idx: int, block_addr: int
+) -> Optional[Block]:
     if seg_idx < 0 or seg_idx >= len(snapshot.segments):
         return None
     segment = snapshot.segments[seg_idx]
@@ -33,7 +37,9 @@ def find_block_by_addr(snapshot: DeviceSnapshot, seg_idx: int, block_addr: int) 
     return None
 
 
-def find_gap_for_alloc_block(snapshot: DeviceSnapshot, event_addr: int, event_size: int, stream: int = None) -> Optional[Tuple[Segment, int]]:
+def find_gap_for_alloc_block(
+    snapshot: DeviceSnapshot, event_addr: int, event_size: int, stream: int = None
+) -> Optional[Tuple[Segment, int]]:
     seg_idx = snapshot.find_segment_idx_by_addr(event_addr, stream)
     if seg_idx == -1:
         return None
@@ -79,7 +85,9 @@ def insert_segment_sorted(snapshot: DeviceSnapshot, segment: Segment):
     segments.insert(idx, segment)
 
 
-def split_segment_at(snapshot: DeviceSnapshot, seg_idx: int, cut_addr: int, cut_size: int) -> bool:
+def split_segment_at(
+    snapshot: DeviceSnapshot, seg_idx: int, cut_addr: int, cut_size: int
+) -> bool:
     _error = "Failed to split segment"
     segments = snapshot.segments
     if seg_idx < 0 or seg_idx >= len(segments):
@@ -90,10 +98,14 @@ def split_segment_at(snapshot: DeviceSnapshot, seg_idx: int, cut_addr: int, cut_
     seg_end = seg_start + original_segment.total_size
     cut_end = cut_addr + cut_size
     if cut_addr < seg_start or cut_end > seg_end:
-        range_ops_logger.error(f"{_error}: cut range [{cut_addr}, {cut_end}) is outside segment [{seg_start}, {seg_end})")
+        range_ops_logger.error(
+            f"{_error}: cut range [{cut_addr}, {cut_end}) is outside segment [{seg_start}, {seg_end})"
+        )
         return False
     if cut_addr == seg_start and cut_end == seg_end:
-        range_ops_logger.warning("Split Seg: cut range covers entire segment, nothing to split, just remove it")
+        range_ops_logger.warning(
+            "Split Seg: cut range covers entire segment, nothing to split, just remove it"
+        )
         del snapshot.segments[seg_idx]
         return True
     left_segment = Segment(
@@ -151,22 +163,32 @@ def split_segment_at(snapshot: DeviceSnapshot, seg_idx: int, cut_addr: int, cut_
     return True
 
 
-def shrink_segment(snapshot: DeviceSnapshot, seg_idx: int, shrink_addr: int, shrink_size: int, direction: str) -> bool:
+def shrink_segment(
+    snapshot: DeviceSnapshot,
+    seg_idx: int,
+    shrink_addr: int,
+    shrink_size: int,
+    direction: str,
+) -> bool:
     _error = "Failed to shrink segment"
     segments = snapshot.segments
     if seg_idx < 0 or seg_idx >= len(segments):
         range_ops_logger.error(f"{_error}: invalid segment index {seg_idx}")
         return False
-    if direction not in ['left', 'right']:
-        range_ops_logger.error(f"{_error}: invalid direction '{direction}', must be 'left' or 'right'")
+    if direction not in ["left", "right"]:
+        range_ops_logger.error(
+            f"{_error}: invalid direction '{direction}', must be 'left' or 'right'"
+        )
         return False
     segment = segments[seg_idx]
     seg_start = segment.address
     seg_end = seg_start + segment.total_size
     shrink_end = shrink_addr + shrink_size
-    if direction == 'left':
+    if direction == "left":
         if shrink_addr < seg_start or shrink_end > seg_end:
-            range_ops_logger.error(f"{_error}: shrink range [{shrink_addr}, {shrink_end}) is outside segment [{seg_start}, {seg_end})")
+            range_ops_logger.error(
+                f"{_error}: shrink range [{shrink_addr}, {shrink_end}) is outside segment [{seg_start}, {seg_end})"
+            )
             return False
         new_start = shrink_end
         new_size = seg_end - new_start
@@ -177,14 +199,20 @@ def shrink_segment(snapshot: DeviceSnapshot, seg_idx: int, shrink_addr: int, shr
             block_start = block.address
             block_end = block_start + block.size
             if block_end <= shrink_end:
-                range_ops_logger.error(f"{_error}: active block [{block_start}, {block_end}) in shrink range [{shrink_addr}, {shrink_end})")
+                range_ops_logger.error(
+                    f"{_error}: active block [{block_start}, {block_end}) in shrink range [{shrink_addr}, {shrink_end})"
+                )
                 return False
         segment.address = new_start
         segment.total_size = new_size
-        segment.blocks = [block for block in segment.blocks if block.address >= new_start]
+        segment.blocks = [
+            block for block in segment.blocks if block.address >= new_start
+        ]
     else:
         if shrink_addr < seg_start or shrink_end > seg_end:
-            range_ops_logger.error(f"{_error}: shrink range [{shrink_addr}, {shrink_end}) is outside segment [{seg_start}, {seg_end})")
+            range_ops_logger.error(
+                f"{_error}: shrink range [{shrink_addr}, {shrink_end}) is outside segment [{seg_start}, {seg_end})"
+            )
             return False
         new_size = shrink_addr - seg_start
         if new_size < 0:
@@ -194,11 +222,19 @@ def shrink_segment(snapshot: DeviceSnapshot, seg_idx: int, shrink_addr: int, shr
             block_start = block.address
             block_end = block_start + block.size
             if block_start >= shrink_addr:
-                range_ops_logger.error(f"{_error}: active block [{block_start}, {block_end}) in shrink range [{shrink_addr}, {shrink_end})")
+                range_ops_logger.error(
+                    f"{_error}: active block [{block_start}, {block_end}) in shrink range [{shrink_addr}, {shrink_end})"
+                )
                 return False
-        segment.blocks = [block for block in segment.blocks if block.address + block.size <= shrink_addr]
+        segment.blocks = [
+            block
+            for block in segment.blocks
+            if block.address + block.size <= shrink_addr
+        ]
         segment.total_size = new_size
-    segment.allocated_size = sum(b.size for b in segment.blocks if b.state == BlockState.ACTIVE_ALLOCATED)
+    segment.allocated_size = sum(
+        b.size for b in segment.blocks if b.state == BlockState.ACTIVE_ALLOCATED
+    )
     segment.active_size = sum(b.size for b in segment.blocks)
     if segment.total_size == 0:
         del segments[seg_idx]
@@ -220,9 +256,14 @@ def merge_segments(snapshot: DeviceSnapshot, target_idx: int, source_idx: int) -
     target = segments[target_idx]
     source = segments[source_idx]
     if target.stream != source.stream:
-        range_ops_logger.error(f"{_error}: segments have different streams (target: {target.stream}, source: {source.stream})")
+        range_ops_logger.error(
+            f"{_error}: segments have different streams (target: {target.stream}, source: {source.stream})"
+        )
         return False
-    are_adjacent = target.address + target.total_size == source.address or source.address + source.total_size == target.address
+    are_adjacent = (
+        target.address + target.total_size == source.address
+        or source.address + source.total_size == target.address
+    )
     if not are_adjacent:
         range_ops_logger.error(
             f"{_error}: segments are not adjacent (target: [{target.address}, {target.address + target.total_size}), source: [{source.address}, {source.address + source.total_size}))"

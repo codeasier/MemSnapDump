@@ -10,7 +10,9 @@ from tests.common import valid_segment
 class TestAllocatorStateConsistency(unittest.TestCase):
 
     @staticmethod
-    def make_snapshot(segments: list[Segment], trace_entries: list[TraceEntry] | None = None) -> DeviceSnapshot:
+    def make_snapshot(
+        segments: list[Segment], trace_entries: list[TraceEntry] | None = None
+    ) -> DeviceSnapshot:
         snapshot = DeviceSnapshot()
         snapshot.segments = sorted(segments, key=lambda seg: (seg.address, seg.stream))
         snapshot.trace_entries = trace_entries or []
@@ -21,15 +23,20 @@ class TestAllocatorStateConsistency(unittest.TestCase):
         return snapshot
 
     @staticmethod
-    def make_segment(address: int, total_size: int, stream: int = 0, blocks: list[Block] | None = None) -> Segment:
+    def make_segment(
+        address: int,
+        total_size: int,
+        stream: int = 0,
+        blocks: list[Block] | None = None,
+    ) -> Segment:
         segment = Segment(
             address=address,
             total_size=total_size,
             stream=stream,
-            segment_type='large',
+            segment_type="large",
             allocated_size=0,
             active_size=0,
-            blocks=[]
+            blocks=[],
         )
         for block in blocks or []:
             block.segment_ptr = segment
@@ -40,19 +47,20 @@ class TestAllocatorStateConsistency(unittest.TestCase):
         return segment
 
     @staticmethod
-    def make_block(address: int, size: int, state: str = BlockState.ACTIVE_ALLOCATED) -> Block:
-        return Block(
-            size=size,
-            requested_size=size,
-            address=address,
-            state=state
-        )
+    def make_block(
+        address: int, size: int, state: str = BlockState.ACTIVE_ALLOCATED
+    ) -> Block:
+        return Block(size=size, requested_size=size, address=address, state=state)
 
     @staticmethod
-    def make_event(action: str, addr: int, size: int, stream: int = 0, idx: int = 0) -> TraceEntry:
+    def make_event(
+        action: str, addr: int, size: int, stream: int = 0, idx: int = 0
+    ) -> TraceEntry:
         return TraceEntry(action=action, addr=addr, size=size, stream=stream, idx=idx)
 
-    def make_allocator(self, segments: list[Segment], trace_entries: list[TraceEntry] | None = None) -> SimulatedCachingAllocator:
+    def make_allocator(
+        self, segments: list[Segment], trace_entries: list[TraceEntry] | None = None
+    ) -> SimulatedCachingAllocator:
         snapshot = self.make_snapshot(segments, trace_entries)
         ctx = AllocatorContext(snapshot)
         return SimulatedCachingAllocator(ctx)
@@ -96,7 +104,9 @@ class TestAllocatorStateConsistency(unittest.TestCase):
     def test_alloc_block_updates_segment_and_snapshot_totals(self):
         segment = self.make_segment(0x1000, 0x1000)
         allocator = self.make_allocator([segment])
-        allocator.ctx.set_current_undo_event(self.make_event('free', 0x1200, 0x100, idx=7))
+        allocator.ctx.set_current_undo_event(
+            self.make_event("free", 0x1200, 0x100, idx=7)
+        )
         new_block = self.make_block(0x1200, 0x100)
 
         allocated = allocator.alloc_block(new_block)
@@ -114,7 +124,7 @@ class TestAllocatorStateConsistency(unittest.TestCase):
         block = self.make_block(0x1200, 0x100)
         segment = self.make_segment(0x1000, 0x1000, blocks=[block])
         allocator = self.make_allocator([segment])
-        event = self.make_event('alloc', 0x1200, 0x100, idx=8)
+        event = self.make_event("alloc", 0x1200, 0x100, idx=8)
 
         freed = allocator.free_block(event)
 
@@ -129,7 +139,7 @@ class TestAllocatorStateConsistency(unittest.TestCase):
         block = self.make_block(0x1200, 0x100, state=BlockState.ACTIVE_PENDING_FREE)
         segment = self.make_segment(0x1000, 0x1000, blocks=[block])
         allocator = self.make_allocator([segment])
-        event = self.make_event('free_requested', 0x1200, 0x100)
+        event = self.make_event("free_requested", 0x1200, 0x100)
 
         activated = allocator.active_block(event)
 
@@ -143,7 +153,7 @@ class TestAllocatorStateConsistency(unittest.TestCase):
         segment = self.make_segment(0x1000, 0x1000)
         allocator = self.make_allocator([segment])
         allocator.ctx.workspace_flag = True
-        event = self.make_event('alloc', 0x1200, 0x100)
+        event = self.make_event("alloc", 0x1200, 0x100)
 
         tolerated = allocator.free_block(event)
 
@@ -153,7 +163,9 @@ class TestAllocatorStateConsistency(unittest.TestCase):
 
     def test_alloc_or_map_segment_updates_reserved_for_non_merge(self):
         allocator = self.make_allocator([])
-        allocator.ctx.set_current_undo_event(self.make_event('segment_free', 0x2000, 0x400, idx=5))
+        allocator.ctx.set_current_undo_event(
+            self.make_event("segment_free", 0x2000, 0x400, idx=5)
+        )
         segment = self.make_segment(0x2000, 0x400)
 
         allocated = allocator.alloc_or_map_segment(segment, merge=False)

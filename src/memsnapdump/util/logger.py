@@ -34,7 +34,9 @@ def set_global_log_file(log_file: str) -> None:
         raise OSError(f"Log directory '{parent_dir}' does not exist.")
 
     if not parent_dir.is_dir() or not check_dir_valid(parent_dir):
-        raise OSError(f"Log directory '{parent_dir}' is not writable or does not exist.")
+        raise OSError(
+            f"Log directory '{parent_dir}' is not writable or does not exist."
+        )
 
     _global_log_file = str(log_path.absolute())
 
@@ -42,12 +44,14 @@ def set_global_log_file(log_file: str) -> None:
         _global_file_handler.close()
 
     formatter = logging.Formatter(
-        fmt='{asctime} [{levelname:^6}][ {name:^12} ]: {message}',
-        datefmt='%Y-%m-%d %H:%M:%S',
-        style='{'
+        fmt="{asctime} [{levelname:^6}][ {name:^12} ]: {message}",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        style="{",
     )
 
-    _global_file_handler = logging.FileHandler(_global_log_file, mode='w', encoding='utf-8')
+    _global_file_handler = logging.FileHandler(
+        _global_log_file, mode="w", encoding="utf-8"
+    )
     _global_file_handler.setLevel(logging.DEBUG)
     _global_file_handler.setFormatter(formatter)
 
@@ -117,9 +121,9 @@ def get_logger(name: str, level: int = logging.INFO) -> logging.Logger:
         logger.handlers.clear()
 
     formatter = logging.Formatter(
-        fmt='{asctime} [{levelname:^6}][ {name:^12} ]: {message}',
-        datefmt='%Y-%m-%d %H:%M:%S',
-        style='{'
+        fmt="{asctime} [{levelname:^6}][ {name:^12} ]: {message}",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        style="{",
     )
 
     console_handler = logging.StreamHandler()
@@ -131,4 +135,3 @@ def get_logger(name: str, level: int = logging.INFO) -> logging.Logger:
         logger.addHandler(_global_file_handler)
 
     return logger
-

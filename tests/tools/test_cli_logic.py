@@ -8,7 +8,9 @@ from memsnapdump.tools.slice_dump import dump as slice_dump_mod
 from memsnapdump.tools.adaptors import snapshot2db as snapshot2db_mod
 
 
-def test_slice_dump_get_args_uses_snapshot_parent_as_default_dump_dir(monkeypatch, tmp_path: Path):
+def test_slice_dump_get_args_uses_snapshot_parent_as_default_dump_dir(
+    monkeypatch, tmp_path: Path
+):
     snapshot_file = tmp_path / "snapshot.pkl"
     snapshot_file.write_bytes(b"data")
     monkeypatch.setattr(
@@ -43,7 +45,9 @@ def test_slice_dump_returns_early_when_trace_data_missing(monkeypatch, tmp_path:
         dump_type="pkl",
     )
     monkeypatch.setattr(slice_dump_mod, "get_args", lambda: args)
-    monkeypatch.setattr(slice_dump_mod, "load_pickle_to_dict", lambda path: {"segments": []})
+    monkeypatch.setattr(
+        slice_dump_mod, "load_pickle_to_dict", lambda path: {"segments": []}
+    )
 
     constructed = {"value": False}
 
@@ -58,7 +62,9 @@ def test_slice_dump_returns_early_when_trace_data_missing(monkeypatch, tmp_path:
     assert constructed["value"] is False
 
 
-def test_slice_dump_happy_path_constructs_snapshot_and_replays(monkeypatch, tmp_path: Path):
+def test_slice_dump_happy_path_constructs_snapshot_and_replays(
+    monkeypatch, tmp_path: Path
+):
     args = SimpleNamespace(
         snapshot_file=str(tmp_path / "snapshot.pkl"),
         device=0,
@@ -100,7 +106,9 @@ def test_slice_dump_happy_path_constructs_snapshot_and_replays(monkeypatch, tmp_
     assert state["replayed"] is True
 
 
-def test_snapshot2db_get_args_uses_snapshot_parent_as_default_dump_dir(monkeypatch, tmp_path: Path):
+def test_snapshot2db_get_args_uses_snapshot_parent_as_default_dump_dir(
+    monkeypatch, tmp_path: Path
+):
     snapshot_file = tmp_path / "snapshot.pkl"
     snapshot_file.write_bytes(b"data")
     monkeypatch.setattr("sys.argv", ["dump2db", str(snapshot_file)])
@@ -113,7 +121,9 @@ def test_snapshot2db_get_args_uses_snapshot_parent_as_default_dump_dir(monkeypat
 
 
 def test_snapshot2db_main_exits_success_when_dump_succeeds(monkeypatch, tmp_path: Path):
-    args = SimpleNamespace(snapshot_file=str(tmp_path / "snapshot.pkl"), dump_dir=str(tmp_path), device=0)
+    args = SimpleNamespace(
+        snapshot_file=str(tmp_path / "snapshot.pkl"), dump_dir=str(tmp_path), device=0
+    )
     monkeypatch.setattr(snapshot2db_mod, "get_args", lambda: args)
     monkeypatch.setattr(snapshot2db_mod, "dump", lambda *a, **k: True)
 
@@ -124,7 +134,9 @@ def test_snapshot2db_main_exits_success_when_dump_succeeds(monkeypatch, tmp_path
 
 
 def test_snapshot2db_main_exits_failed_when_dump_fails(monkeypatch, tmp_path: Path):
-    args = SimpleNamespace(snapshot_file=str(tmp_path / "snapshot.pkl"), dump_dir=str(tmp_path), device=0)
+    args = SimpleNamespace(
+        snapshot_file=str(tmp_path / "snapshot.pkl"), dump_dir=str(tmp_path), device=0
+    )
     monkeypatch.setattr(snapshot2db_mod, "get_args", lambda: args)
     monkeypatch.setattr(snapshot2db_mod, "dump", lambda *a, **k: False)
 

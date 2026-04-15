@@ -211,7 +211,37 @@ python -m memsnapdump.tools.dump2db /data/snapshot.pickle -o /data/output -l /da
 
 日志文件将记录所有模块（LOAD、REPLAY、ALLOCATOR、DatabaseDump）的输出信息。
 
-## 3. 项目结构说明
+## 3. 本地开发检查
+
+安装开发依赖：
+
+```bash
+python -m pip install -e .[dev]
+```
+
+检查命令：
+
+```bash
+ruff check .
+black --check .
+pytest --cov=memsnapdump --cov-fail-under=85
+```
+
+本地自动修复：
+
+```bash
+ruff check . --fix
+black .
+```
+
+GitHub Pull Request workflow 会在 PR 上执行：
+- `ruff check .`
+- `black --check .`
+- `pytest --cov=memsnapdump --cov-fail-under=85`
+
+并在 Python `3.10`、`3.11`、`3.12` 矩阵下运行测试。
+
+## 4. 项目结构说明
 ```text
 MemSnapDump/
 ├── src/
@@ -232,6 +262,6 @@ MemSnapDump/
 │   ├── simulate/               # simulate 模块测试
 │   ├── tools/                  # CLI 与工具模块测试
 │   └── util/                   # util 模块测试
-├── pyproject.toml              # 打包、pytest、coverage 配置
+├── pyproject.toml              # 打包、pytest、coverage、ruff、black 配置
 └── README.md                   # 项目说明文档
 ```

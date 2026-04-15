@@ -48,7 +48,13 @@ class TestReplayExecutor(unittest.TestCase):
         self.executor = ReplayExecutor(self.allocator, self.logger)
 
     @staticmethod
-    def make_event(action: str, addr: int = 0x1000, size: int = 0x100, stream: int = 0, idx: int = 1) -> TraceEntry:
+    def make_event(
+        action: str,
+        addr: int = 0x1000,
+        size: int = 0x100,
+        stream: int = 0,
+        idx: int = 1,
+    ) -> TraceEntry:
         return TraceEntry(action=action, addr=addr, size=size, stream=stream, idx=idx)
 
     def test_execute_free_event_maps_to_alloc_block(self):

@@ -37,8 +37,10 @@ def timer(name: Optional[str] = None, logger: Optional[logging.Logger] = None):
         ...     time.sleep(0.5)
         2024-01-01 12:00:00 [ INFO ][ __main__ ]: 数据处理 took 0.5023 seconds
     """
+
     def decorator(func: Callable):
         _name = func.__name__ if not name else name
+
         @wraps(func)
         def wrapper(*args, **kwargs):
             start = time.perf_counter()

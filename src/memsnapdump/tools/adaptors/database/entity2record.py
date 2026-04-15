@@ -1,7 +1,4 @@
-from .defs import (
-    EventFieldDefs,
-    BlockFieldDefs
-)
+from .defs import EventFieldDefs, BlockFieldDefs
 
 from memsnapdump.base import TraceEntry, Block
 
@@ -26,9 +23,13 @@ next_default_block_id = make_default_id_counter()
 next_default_event_id = make_default_id_counter()
 
 
-def event2record(event: TraceEntry, allocated: int = 0, active: int = 0, reserved: int = 0) -> dict:
+def event2record(
+    event: TraceEntry, allocated: int = 0, active: int = 0, reserved: int = 0
+) -> dict:
     return {
-        EventFieldDefs.ID: event.idx if event.idx is not None else next_default_event_id(),
+        EventFieldDefs.ID: (
+            event.idx if event.idx is not None else next_default_event_id()
+        ),
         EventFieldDefs.ACTION: event.action,
         EventFieldDefs.ADDR: event.addr,
         EventFieldDefs.SIZE: event.size,
@@ -36,17 +37,25 @@ def event2record(event: TraceEntry, allocated: int = 0, active: int = 0, reserve
         EventFieldDefs.ALLOCATED: allocated,
         EventFieldDefs.ACTIVE: active,
         EventFieldDefs.RESERVED: reserved,
-        EventFieldDefs.CALLSTACK: event.get_callstack()
+        EventFieldDefs.CALLSTACK: event.get_callstack(),
     }
 
 
 def block2record(block: Block) -> dict:
     return {
-        BlockFieldDefs.ID: block.alloc_event_idx if block.alloc_event_idx is not None else next_default_block_id(),
+        BlockFieldDefs.ID: (
+            block.alloc_event_idx
+            if block.alloc_event_idx is not None
+            else next_default_block_id()
+        ),
         BlockFieldDefs.ADDR: block.address,
         BlockFieldDefs.SIZE: block.size,
         BlockFieldDefs.REQUESTED_SIZE: block.requested_size,
         BlockFieldDefs.STATE: block.state,
-        BlockFieldDefs.ALLOC_EVENT_ID: block.alloc_event_idx if block.alloc_event_idx is not None else -1,
-        BlockFieldDefs.FREE_EVENT_ID: block.free_event_idx if block.free_event_idx is not None else -1,
+        BlockFieldDefs.ALLOC_EVENT_ID: (
+            block.alloc_event_idx if block.alloc_event_idx is not None else -1
+        ),
+        BlockFieldDefs.FREE_EVENT_ID: (
+            block.free_event_idx if block.free_event_idx is not None else -1
+        ),
     }

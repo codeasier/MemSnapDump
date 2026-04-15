@@ -11,7 +11,10 @@ def make_snapshot(entries_count: int):
     snapshot = DeviceSnapshot()
     snapshot.device = 0
     snapshot.segments = []
-    snapshot.trace_entries = [TraceEntry(action="alloc", addr=i, size=1, stream=0, idx=i) for i in range(entries_count)]
+    snapshot.trace_entries = [
+        TraceEntry(action="alloc", addr=i, size=1, stream=0, idx=i)
+        for i in range(entries_count)
+    ]
     return snapshot
 
 
@@ -20,7 +23,9 @@ def test_slice_dump_hooker_rejects_invalid_directory(tmp_path: Path):
         SliceDumpHooker(str(tmp_path / "missing"), num_of_slices=1)
 
 
-def test_slice_dump_hooker_init_strategy_adjusts_num_slices_and_max_entries(tmp_path: Path):
+def test_slice_dump_hooker_init_strategy_adjusts_num_slices_and_max_entries(
+    tmp_path: Path,
+):
     hooker = SliceDumpHooker(str(tmp_path), num_of_slices=2, max_entries=3)
     hooker.num_of_events = 10
 
@@ -31,7 +36,9 @@ def test_slice_dump_hooker_init_strategy_adjusts_num_slices_and_max_entries(tmp_
 
 
 def test_slice_dump_hooker_dump_json_writes_file(tmp_path: Path):
-    hooker = SliceDumpHooker(str(tmp_path), num_of_slices=2, max_entries=2, dump_type="json")
+    hooker = SliceDumpHooker(
+        str(tmp_path), num_of_slices=2, max_entries=2, dump_type="json"
+    )
     hooker.num_of_events = 4
     hooker.prev_segments = []
     hooker.events_buffer = [TraceEntry(action="alloc", addr=1, size=2, stream=0, idx=1)]

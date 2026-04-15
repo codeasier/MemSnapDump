@@ -64,7 +64,9 @@ def test_sqlite_column_validation_and_sql_generation():
 
     assert SqliteColumn("flag", bool, default=True)._format_default() == "1"
     assert SqliteColumn("score", float, default=1.5)._format_default() == "1.5"
-    assert SqliteColumn("misc", dict, default={"a": 1})._format_default() == "'{\'a\': 1}'"
+    assert (
+        SqliteColumn("misc", dict, default={"a": 1})._format_default() == "'{'a': 1}'"
+    )
 
 
 def test_sqlite_table_helpers_create_insert_and_index(tmp_path: Path):
@@ -99,10 +101,12 @@ def test_sqlite_table_helpers_create_insert_and_index(tmp_path: Path):
 
     assert SqliteTable.get_insert_columns_by_record({"a": 1, "b": 2}) == ["`a`", "`b`"]
     assert SqliteTable.get_insert_placeholder_by_record({"a": 1, "b": 2}) == "?, ?"
-    assert table.get_insert_values_by_records([
-        {"id": 4, "name": "Dan", "active": True},
-        {"id": 5, "name": "Eve", "active": False},
-    ]) == [(4, "Dan", 1), (5, "Eve", 0)]
+    assert table.get_insert_values_by_records(
+        [
+            {"id": 4, "name": "Dan", "active": True},
+            {"id": 5, "name": "Eve", "active": False},
+        ]
+    ) == [(4, "Dan", 1), (5, "Eve", 0)]
     assert table.get_insert_values_by_records([]) == []
 
     conn.close()

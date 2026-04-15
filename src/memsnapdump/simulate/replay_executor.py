@@ -13,7 +13,11 @@ class ReplayExecutor:
     def execute(self, event: TraceEntry) -> bool:
         if event.action in ["free", "free_completed"]:
             block = Block.build_from_event(event)
-            block.state = BlockState.ACTIVE_ALLOCATED if event.action == "free" else BlockState.ACTIVE_PENDING_FREE
+            block.state = (
+                BlockState.ACTIVE_ALLOCATED
+                if event.action == "free"
+                else BlockState.ACTIVE_PENDING_FREE
+            )
             return self.allocator.alloc_block(block)
         if event.action == "free_requested":
             return self.allocator.active_block(event)
@@ -22,7 +26,9 @@ class ReplayExecutor:
         if event.action in ["segment_free", "segment_unmap"]:
             segment = Segment.build_from_event(event)
             segment.free_or_unmap_event_idx = event.idx
-            return self.allocator.alloc_or_map_segment(segment, merge=event.action == "segment_unmap")
+            return self.allocator.alloc_or_map_segment(
+                segment, merge=event.action == "segment_unmap"
+            )
         if event.action == "segment_alloc":
             return self.allocator.free_segment(event)
         if event.action == "segment_map":

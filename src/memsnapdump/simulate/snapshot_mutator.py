@@ -2,7 +2,9 @@ from memsnapdump.base import Block, BlockState, DeviceSnapshot, Segment
 from . import range_ops
 
 
-def attach_block(snapshot: DeviceSnapshot, segment: Segment, block: Block, insert_idx: int):
+def attach_block(
+    snapshot: DeviceSnapshot, segment: Segment, block: Block, insert_idx: int
+):
     block.segment_ptr = segment
     segment.blocks.insert(insert_idx, block)
     segment.active_size += block.size
@@ -48,7 +50,12 @@ def remove_segment(snapshot: DeviceSnapshot, segment: Segment):
         block.segment_ptr = None
 
 
-def merge_mapped_segment(snapshot: DeviceSnapshot, new_segment: Segment, left_adjacent_idx: int, right_adjacent_idx: int) -> bool:
+def merge_mapped_segment(
+    snapshot: DeviceSnapshot,
+    new_segment: Segment,
+    left_adjacent_idx: int,
+    right_adjacent_idx: int,
+) -> bool:
     segments = snapshot.segments
     left_seg = segments[left_adjacent_idx]
     left_seg.total_size += new_segment.total_size
@@ -62,14 +69,18 @@ def merge_mapped_segment(snapshot: DeviceSnapshot, new_segment: Segment, left_ad
     return True
 
 
-def split_or_shrink_segment(snapshot: DeviceSnapshot, seg_idx: int, seg_addr: int, unmap_size: int) -> bool:
+def split_or_shrink_segment(
+    snapshot: DeviceSnapshot, seg_idx: int, seg_addr: int, unmap_size: int
+) -> bool:
     exist_seg = snapshot.segments[seg_idx]
     seg_start = exist_seg.address
     unmap_end = seg_addr + unmap_size
     if seg_addr == seg_start:
-        return range_ops.shrink_segment(snapshot, seg_idx, seg_addr, unmap_size, 'left')
+        return range_ops.shrink_segment(snapshot, seg_idx, seg_addr, unmap_size, "left")
     if unmap_end == seg_start + exist_seg.total_size:
-        return range_ops.shrink_segment(snapshot, seg_idx, seg_addr, unmap_size, 'right')
+        return range_ops.shrink_segment(
+            snapshot, seg_idx, seg_addr, unmap_size, "right"
+        )
     return range_ops.split_segment_at(snapshot, seg_idx, seg_addr, unmap_size)
 
 
@@ -79,4 +90,3 @@ def increase_reserved(snapshot: DeviceSnapshot, size: int):
 
 def decrease_reserved(snapshot: DeviceSnapshot, size: int):
     snapshot.total_reserved -= size
-

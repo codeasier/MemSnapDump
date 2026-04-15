@@ -35,7 +35,9 @@ def load_pickle_to_dict(pickle_file: Path) -> dict:
         raise pickle.UnpicklingError(f"Cannot load pickle file: {pickle_file}")
 
     if not isinstance(data, dict):
-        raise ValueError(f"The content of the pickle file is not of type dict, actual type: {type(data).__name__}")
+        raise ValueError(
+            f"The content of the pickle file is not of type dict, actual type: {type(data).__name__}"
+        )
 
     return data
 
@@ -54,7 +56,9 @@ def save_dict_to_pickle(data: Dict[Any, Any], path: Path, protocol: int = 4) -> 
         OSError: 文件写入失败（如权限不足、磁盘满等）
     """
     if not isinstance(data, dict):
-        raise TypeError(f"Only dict type is supported, but received: {type(data).__name__}")
+        raise TypeError(
+            f"Only dict type is supported, but received: {type(data).__name__}"
+        )
     path.parent.mkdir(parents=True, exist_ok=True)  # 自动创建父目录
 
     try:
@@ -64,7 +68,9 @@ def save_dict_to_pickle(data: Dict[Any, Any], path: Path, protocol: int = 4) -> 
         raise OSError(f"Unable to write to file {path}: {e}") from e
 
 
-def check_dir_valid(path: str | Path, need_readable: bool = True, need_writable: bool = True) -> bool:
+def check_dir_valid(
+    path: str | Path, need_readable: bool = True, need_writable: bool = True
+) -> bool:
     """
     校验目录是否合法，默认要求可读可写。
 
@@ -94,7 +100,9 @@ def check_dir_valid(path: str | Path, need_readable: bool = True, need_writable:
     return True
 
 
-def check_file_valid(path: str | Path, need_readable: bool = True, need_writable: bool = False) -> bool:
+def check_file_valid(
+    path: str | Path, need_readable: bool = True, need_writable: bool = False
+) -> bool:
     """
     校验文件是否合法，默认要求可读，不要求可写。
 

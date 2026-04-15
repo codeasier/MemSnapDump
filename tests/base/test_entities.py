@@ -1,15 +1,18 @@
 import unittest
-from memsnapdump.base import Frame, TraceEntry, Block, BlockState, Segment, DeviceSnapshot
+from memsnapdump.base import (
+    Frame,
+    TraceEntry,
+    Block,
+    BlockState,
+    Segment,
+    DeviceSnapshot,
+)
 
 
 class TestFrame(unittest.TestCase):
 
     def test_from_dict(self):
-        frame_dict = {
-            "filename": "test.py",
-            "line": 42,
-            "name": "test_func"
-        }
+        frame_dict = {"filename": "test.py", "line": 42, "name": "test_func"}
         frame = Frame.from_dict(frame_dict)
         self.assertEqual(frame.filename, "test.py")
         self.assertEqual(frame.line, 42)
@@ -17,11 +20,7 @@ class TestFrame(unittest.TestCase):
         self.assertEqual(frame._origin, frame_dict)
 
     def test_to_dict_with_origin(self):
-        frame_dict = {
-            "filename": "test.py",
-            "line": 42,
-            "name": "test_func"
-        }
+        frame_dict = {"filename": "test.py", "line": 42, "name": "test_func"}
         frame = Frame.from_dict(frame_dict)
         result = frame.to_dict()
         self.assertEqual(result, frame_dict)
@@ -47,8 +46,8 @@ class TestTraceEntry(unittest.TestCase):
             "stream": "0",
             "frames": [
                 {"filename": "test.py", "line": 10, "name": "func_a"},
-                {"filename": "test.py", "line": 20, "name": "func_b"}
-            ]
+                {"filename": "test.py", "line": 20, "name": "func_b"},
+            ],
         }
         trace = TraceEntry.from_dict(trace_dict)
         self.assertEqual(trace.action, "alloc")
@@ -64,7 +63,7 @@ class TestTraceEntry(unittest.TestCase):
             "action": "free_requested",
             "addr": 0x2000,
             "size": "2048",
-            "stream": "1"
+            "stream": "1",
         }
         trace = TraceEntry.from_dict(trace_dict)
         self.assertEqual(trace.action, "free_requested")
@@ -80,8 +79,8 @@ class TestTraceEntry(unittest.TestCase):
             "stream": "0",
             "frames": [
                 {"filename": "test.py", "line": 10, "name": "func_a"},
-                {"filename": "main.py", "line": 20, "name": "func_b"}
-            ]
+                {"filename": "main.py", "line": 20, "name": "func_b"},
+            ],
         }
         trace = TraceEntry.from_dict(trace_dict)
         callstack = trace.get_callstack()
@@ -100,7 +99,7 @@ class TestTraceEntry(unittest.TestCase):
             "addr": 0x1000,
             "size": "1024",
             "stream": "0",
-            "frames": []
+            "frames": [],
         }
         trace = TraceEntry.from_dict(trace_dict)
         result = trace.to_dict()
@@ -115,9 +114,7 @@ class TestBlock(unittest.TestCase):
             "requested_size": 512,
             "address": 0x1000,
             "state": "active_allocated",
-            "frames": [
-                {"filename": "test.py", "line": 10, "name": "alloc_func"}
-            ]
+            "frames": [{"filename": "test.py", "line": 10, "name": "alloc_func"}],
         }
         block = Block.from_dict(block_dict)
         self.assertEqual(block.size, 1024)
@@ -132,9 +129,7 @@ class TestBlock(unittest.TestCase):
             "addr": 0x2000,
             "size": "2048",
             "stream": "0",
-            "frames": [
-                {"filename": "test.py", "line": 10, "name": "func"}
-            ]
+            "frames": [{"filename": "test.py", "line": 10, "name": "func"}],
         }
         event = TraceEntry.from_dict(trace_dict)
         block = Block.build_from_event(event)
@@ -158,7 +153,9 @@ class TestBlock(unittest.TestCase):
             requested_size=512,
             address=0x1000,
             state=BlockState.ACTIVE_ALLOCATED,
-            frames=[Frame.from_dict({"filename": "test.py", "line": 10, "name": "func"})]
+            frames=[
+                Frame.from_dict({"filename": "test.py", "line": 10, "name": "func"})
+            ],
         )
         result = block.to_dict()
         self.assertEqual(result["size"], 1024)
@@ -186,16 +183,16 @@ class TestSegment(unittest.TestCase):
                     "requested_size": 1024,
                     "address": 0x10000,
                     "state": "active_allocated",
-                    "frames": []
+                    "frames": [],
                 },
                 {
                     "size": 2048,
                     "requested_size": 2048,
                     "address": 0x10800,
                     "state": "inactive",
-                    "frames": []
-                }
-            ]
+                    "frames": [],
+                },
+            ],
         }
         segment = Segment.from_dict(segment_dict)
         self.assertEqual(segment.address, 0x10000)
@@ -217,7 +214,7 @@ class TestSegment(unittest.TestCase):
             "device": 0,
             "is_expandable": True,
             "frames": [],
-            "blocks": []
+            "blocks": [],
         }
         segment = Segment.from_dict(segment_dict)
         self.assertTrue(segment.is_expandable)
@@ -228,7 +225,7 @@ class TestSegment(unittest.TestCase):
             "addr": 0x20000,
             "size": "8192",
             "stream": "1",
-            "frames": []
+            "frames": [],
         }
         event = TraceEntry.from_dict(trace_dict)
         segment = Segment.build_from_event(event, True)
@@ -245,7 +242,7 @@ class TestSegment(unittest.TestCase):
             "addr": 0x30000,
             "size": "16384",
             "stream": "0",
-            "frames": []
+            "frames": [],
         }
         event = TraceEntry.from_dict(trace_dict)
         segment = Segment.build_from_event(event)
@@ -275,7 +272,7 @@ class TestSegment(unittest.TestCase):
             allocated_size=2048,
             active_size=2048,
             device=0,
-            is_expandable=False
+            is_expandable=False,
         )
         result = segment.to_dict()
         self.assertEqual(result["address"], 0x10000)
@@ -304,22 +301,36 @@ class TestDeviceSnapshot(unittest.TestCase):
                             "requested_size": 1024,
                             "address": 0x10000,
                             "state": "active_allocated",
-                            "frames": []
+                            "frames": [],
                         },
                         {
                             "size": 2048,
                             "requested_size": 2048,
                             "address": 0x10800,
                             "state": "inactive",
-                            "frames": []
-                        }
-                    ]
+                            "frames": [],
+                        },
+                    ],
                 }
             ],
-            "device_traces": [[
-                {"action": "alloc", "addr": 0x10000, "size": "1024", "stream": "0", "frames": []},
-                {"action": "free_requested", "addr": 0x10000, "size": "1024", "stream": "0", "frames": []}
-            ]]
+            "device_traces": [
+                [
+                    {
+                        "action": "alloc",
+                        "addr": 0x10000,
+                        "size": "1024",
+                        "stream": "0",
+                        "frames": [],
+                    },
+                    {
+                        "action": "free_requested",
+                        "addr": 0x10000,
+                        "size": "1024",
+                        "stream": "0",
+                        "frames": [],
+                    },
+                ]
+            ],
         }
         snapshot = DeviceSnapshot.from_dict(snapshot_dict, 0)
         self.assertEqual(len(snapshot.segments), 1)
@@ -372,10 +383,7 @@ class TestDeviceSnapshot(unittest.TestCase):
         self.assertEqual(snapshot.find_segment_idx_by_addr(0x30000, stream=1), 3)
 
     def test_to_dict(self):
-        snapshot_dict = {
-            "segments": [],
-            "device_traces": [[]]
-        }
+        snapshot_dict = {"segments": [], "device_traces": [[]]}
         snapshot = DeviceSnapshot.from_dict(snapshot_dict, 0)
         result = snapshot.to_dict()
         self.assertIn("segments", result)
@@ -384,4 +392,5 @@ class TestDeviceSnapshot(unittest.TestCase):
 
 if __name__ == "__main__":
     import unittest
+
     unittest.main(verbosity=2, module="test_entities")

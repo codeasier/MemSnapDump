@@ -1,4 +1,3 @@
-from memsnapdump.base import TraceEntry
 from memsnapdump.simulate import SimulateDeviceSnapshot
 
 
@@ -24,21 +23,25 @@ class AllocatorHooker:
 def make_snapshot_dict(action="alloc", with_segment=False):
     payload = {
         "segments": [],
-        "device_traces": [[{"action": action, "addr": 1, "size": 1, "stream": 0, "frames": []}]],
+        "device_traces": [
+            [{"action": action, "addr": 1, "size": 1, "stream": 0, "frames": []}]
+        ],
     }
     if with_segment:
-        payload["segments"] = [{
-            "address": 1,
-            "total_size": 16,
-            "stream": 0,
-            "segment_type": "small",
-            "allocated_size": 0,
-            "active_size": 0,
-            "device": 0,
-            "is_expandable": False,
-            "frames": [],
-            "blocks": [],
-        }]
+        payload["segments"] = [
+            {
+                "address": 1,
+                "total_size": 16,
+                "stream": 0,
+                "segment_type": "small",
+                "allocated_size": 0,
+                "active_size": 0,
+                "device": 0,
+                "is_expandable": False,
+                "frames": [],
+                "blocks": [],
+            }
+        ]
     return payload
 
 

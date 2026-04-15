@@ -5,9 +5,20 @@ SQLite 元数据管理模块
 支持 Python 类型到 SQLite 类型的自动转换，以及表结构的元数据管理。
 """
 
+import ast
 import os.path
 import sqlite3
-from typing import Any, Dict, List, Optional, Type, Union, Iterable, get_origin, get_args
+from typing import (
+    Any,
+    Dict,
+    List,
+    Optional,
+    Type,
+    Union,
+    Iterable,
+    get_origin,
+    get_args,
+)
 
 # 支持的 Python 类型映射
 _PY_TYPE_TO_SQLITE = {
@@ -51,9 +62,6 @@ def _sqlite_type_to_py_type(sqlite_type: str) -> type:
     return str
 
 
-import ast
-
-
 def _parse_default_value(dflt_str: str) -> Any:
     """将 PRAGMA 返回的默认值字符串转为 Python 对象"""
     if dflt_str is None:
@@ -62,12 +70,12 @@ def _parse_default_value(dflt_str: str) -> Any:
     # 尝试解析为字面量（支持数字、字符串、布尔、None）
     try:
         # 处理 SQLite 中的布尔：'1'/'0' 或 'true'/'false'（但 SQLite 实际存整数）
-        if dflt_str == '1':
+        if dflt_str == "1":
             return True
-        elif dflt_str == '0':
+        elif dflt_str == "0":
             return False
-        elif dflt_str.lower() in ('true', 'false'):
-            return dflt_str.lower() == 'true'
+        elif dflt_str.lower() in ("true", "false"):
+            return dflt_str.lower() == "true"
         # 尝试用 ast.literal_eval 安全解析
         return ast.literal_eval(dflt_str)
     except (ValueError, SyntaxError):
@@ -107,15 +115,15 @@ class SqliteColumn:
     """
 
     def __init__(
-            self,
-            name: str,
-            data_type: Type = str,
-            primary_key: bool = False,  # 是否主键
-            autoincrement: bool = False,  # 是否自增
-            not_null: bool = False,  # 是否不可为空
-            unique: bool = False,  # 是否唯一
-            default: Optional[Any] = None,  # 缺省值,
-            value_map: Dict[Any, Any] = None,
+        self,
+        name: str,
+        data_type: Type = str,
+        primary_key: bool = False,  # 是否主键
+        autoincrement: bool = False,  # 是否自增
+        not_null: bool = False,  # 是否不可为空
+        unique: bool = False,  # 是否唯一
+        default: Optional[Any] = None,  # 缺省值,
+        value_map: Dict[Any, Any] = None,
     ):
         if autoincrement and not primary_key:
             raise ValueError("autoincrement requires primary_key=True")
@@ -232,7 +240,9 @@ class SqliteTable:
             return f"{drop_sql}\n{create_sql}"
         else:
             # 使用 IF NOT EXISTS 更安全
-            create_sql = create_sql.replace("CREATE TABLE", "CREATE TABLE IF NOT EXISTS", 1)
+            create_sql = create_sql.replace(
+                "CREATE TABLE", "CREATE TABLE IF NOT EXISTS", 1
+            )
             return create_sql
 
     def create_table(self, conn: sqlite3.Connection, delete_if_exists: bool = False):
@@ -252,7 +262,9 @@ class SqliteTable:
         :param column_name: 列名
         :return:
         """
-        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.name}_{column_name} ON {self.name} ({column_name});")
+        conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_{self.name}_{column_name} ON {self.name} ({column_name});"
+        )
         conn.commit()
 
     def insert_record(self, conn: sqlite3.Connection, record: Dict[str, Any]):
@@ -316,7 +328,7 @@ class SqliteTable:
         Returns:
             str: 占位符字符串，如 "?, ?, ?"
         """
-        return ', '.join(['?' for _ in record.keys()])
+        return ", ".join(["?" for _ in record.keys()])
 
     def get_insert_values_by_records(self, records: List[Dict[str, Any]]):
         """
@@ -330,7 +342,13 @@ class SqliteTable:
         """
         if not records:
             return []
-        return [tuple(self._column_value_map.get(k, {}).get(r[k], r[k]) for k in records[0].keys()) for r in records]
+        return [
+            tuple(
+                self._column_value_map.get(k, {}).get(r[k], r[k])
+                for k in records[0].keys()
+            )
+            for r in records
+        ]
 
 
 class SqliteDB:
@@ -358,7 +376,9 @@ class SqliteDB:
     conn: sqlite3.Connection
     table_cache: Dict[str, SqliteTable]
 
-    def __init__(self, path: str, auto_create: bool = True, with_dictionary_table: bool = False):
+    def __init__(
+        self, path: str, auto_create: bool = True, with_dictionary_table: bool = False
+    ):
         self.path = os.path.realpath(path)
         if not os.path.exists(self.path):
             if not auto_create:
@@ -388,15 +408,13 @@ class SqliteDB:
         self.table_cache[table.name] = table
         if not self.with_dictionary_table:
             return
-        dictionary_table = self.get_table_by_name('dictionary')
+        dictionary_table = self.get_table_by_name("dictionary")
         for column_name, value_map in table._column_value_map.items():
             for key, value in value_map.items():
-                dictionary_table.insert_record(self.conn, dict(
-                    table=table.name,
-                    column=column_name,
-                    key=value,
-                    value=key
-                ))
+                dictionary_table.insert_record(
+                    self.conn,
+                    dict(table=table.name, column=column_name, key=value, value=key),
+                )
         self.conn.commit()
 
     def delete_table(self, table_name: str):
@@ -405,12 +423,12 @@ class SqliteDB:
 
     def _create_dictionary_table(self):
         _table_columns = [
-            SqliteColumn(name='table'),
-            SqliteColumn(name='column'),
-            SqliteColumn(name='key'),
-            SqliteColumn(name='value')
+            SqliteColumn(name="table"),
+            SqliteColumn(name="column"),
+            SqliteColumn(name="key"),
+            SqliteColumn(name="value"),
         ]
-        _dictionary_table = SqliteTable('dictionary', _table_columns)
+        _dictionary_table = SqliteTable("dictionary", _table_columns)
         _dictionary_table.create_table(self.conn, delete_if_exists=True)
         self.table_cache[_dictionary_table.name] = _dictionary_table
 
@@ -430,12 +448,15 @@ class SqliteDB:
         if table_name in self.table_cache:
             return True
         cursor = self.conn.cursor()
-        cursor.execute("""
+        cursor.execute(
+            """
                        SELECT name
                        FROM sqlite_master
                        WHERE type = 'table'
                          AND name = ?
-                       """, (table_name,))
+                       """,
+            (table_name,),
+        )
         exist = cursor.fetchone() is not None
         if exist:
             self.table_cache[table_name] = self.get_table_by_name(table_name)
