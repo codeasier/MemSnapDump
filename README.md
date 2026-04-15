@@ -1,225 +1,54 @@
+[中文文档](README.zh.md)
+
 # MemSnapDump
-本工具用于对 `torch / torch_npu` 采集的内存快照（`snapshot`）文件进行分析、处理。
-## 1. 前言
-项目持续更新中...
-如果您有好的想法、建议或诉求，欢迎您提交issue及PR。
-### 1.1 memory snapshot
-可参考：[Understanding CUDA Memory Usage](docpys.pytorch.org/docs/stable/torch_cuda_memory.html)中的采集与可视化方法。
-### 1.2 可视化：memory_viz
-pytorch社区提供了snapshot数据可视化的工具[memory_viz](https://pytorch.org/memory_viz)。
 
-虽然其功能已经足够强大，但仍然存在一些痛点，如：
-- Snapshot数据量较大（尤其entries量大时）时，性能瓶颈较为严重，如`Active Memory Timeline`卡顿，缩放耗时长等；`Allocator State History`点击事件搜索卡顿、点击事件后卡顿等。
-- 联动分析易用性不足，如`Timeline`与`State History`仅能通过地址进行关联。调用栈无法直接搜索等。
+MemSnapDump is a toolkit for replaying, slicing, and exporting memory snapshots collected from `torch` / `torch_npu`.
 
-本项目旨在提供一些：
-- `数据分析能力`(暂未实现）：利用固化的经验直接分析snapshot数据识别一些常见的显存问题，如`内存泄漏`、`碎片分析`、`峰值拆解`等能力。
-- `数据剪裁能力`：针对数据量较大的场景，能够对数据进行无损剪裁或切片，以支持分片后导入memory_viz进行局部的内存分析。
-- ...
-### 1.3 关于内存快照数据的一些简单说明与理解
-内存快照数据，其核心组成包含两部分：
-- `segments`：内存段状态数据，即调用`_dump_snapshot`**时刻**的，当前PyTorch内存池组成与状态的数据。
-  - 特点：记录了dump时刻的内存池详细分配情况等，但无法仅依靠该数据查看到动态的随时间变化的内存分配变化，是“**静态的**”。
-- `device_traces`：历史内存事件序列，即从开始记录到dump时发生过的历史内存事件。
-  - 特点：记录了从使能(调用`memory._record_memory_history`时刻)开始到dump之间历史的发生过的内存块/内存段的申请、释放事件，是“**动态的**”。
+## What it does
+- Replay snapshot event history to reconstruct allocator state changes
+- Slice large snapshot files into smaller pieces for focused inspection
+- Export snapshot data into SQLite for downstream analysis and tooling
 
-而memory_viz之所以能在`Timeline`查看随“时间”变化的内存块生命周期、`State History`查看任意事件发生时的内存池状态，主要就是基于上述dump时刻的静态数据+ _**回放**_
-历史事件形成了动态的可视化呈现。
-
-因此可以做出如下简单的定义：
-- 第x个事件发生时的内存段状态：`state.x`
-- 从第x1个事件到第x2个事件的序列：`evt[x1:x2]`
-
-对于任意时刻dump出的内存快照数据，假设其在dump前一共记录了X个内存事件，那么该内存快照实际承载的数据可以简单表示为
-`state.X + evt[1:X]`
-## 2. 核心功能说明
-### 2.1 快照回放
-#### 2.1.1 简介
-如[前言](#13-关于内存快照数据的一些简单说明与理解)所述，对于snapshot
-数据，如果想要分析采集时段内的内存分配情况或进行数据剪裁，进行`快照回放`将是一个必不可少的功能。本项目当前`快照回放`功能，作为一个基础功能，主要用于进行内存回放，并在回放过程中支持`注册单事件回放前、后钩子`，以便使用者能够不必花费过多时间了解内存事件回放的原理、过程与各类内存池状态的转化处理。
-#### 2.1.2 使用约束
-- 采集的内存快照数据需要包含历史内存事件
-```python
-# 昇腾torch_npu
-# import torch_npu
-torch_npu.npu.memory._record_memory_history()
-# Nvdia
-# import torch
-torch.cuda.memory._record_memory_history()
-```
-#### 2.1.3 使用方式
-核心回放实现 `simulate/simulate.py`，其中钩子类定义如下：
-```python
-class SimulateHooker(ABC):
-    @abstractmethod
-    def pre_undo_event(self, wait4undo_event: TraceEntry, current_snapshot: DeviceSnapshot) -> bool:
-        """
-            【READONLY】在回放事件前回调，此时事件列表**并未POP**出该事件
-        :param wait4undo_event: （只读）待回放的事件（仍在事件列表中）
-        :param current_snapshot: （只读）当前的内存块快照
-        :return 返回true继续执行，返回false将中断
-        """
-        ...
-
-    @abstractmethod
-    def post_undo_event(self, already_undo_event: TraceEntry, current_snapshot: DeviceSnapshot):
-        """
-            【READONLY】在回放事件后回调，此时snapshot已经将该事件从事件列表中丢弃，且segments已回放到事件发生前
-        :param already_undo_event: 已回放的事件
-        :param current_snapshot: （只读）当前内存快照
-        :return 返回true继续执行，返回false将中断
-        """
-        ...
-
-
-class AllocatorHooker(ABC):
-    def pre_replay_alloc_block(self, wait4alloc_block: Block, current_snapshot: DeviceSnapshot):
-        """在**回放时**分配一个内存块**前**回调，对应一个内存块释放事件回滚前"""
-        ...
-
-    def post_replay_alloc_block(self, allocated_block: Block, current_snapshot: DeviceSnapshot):
-        """在**回放时**分配一个内存块**后**回调，对应一个内存块释放事件回滚后"""
-        ...
-
-    def pre_replay_free_block(self, wait4free_block: Block, current_snapshot: DeviceSnapshot):
-        """在**回放时**释放一个内存块**前**回调，对应一个内存块申请事件回滚前"""
-        ...
-
-    def post_replay_free_block(self, released_block: Block, current_snapshot: DeviceSnapshot):
-        """在回放时，释放一个内存块**后**回调，对应一个内存块申请事件回滚后"""
-        ...
-
-    # 此外还包含 segment 相关的钩子方法
-```
-使用示例代码如下：
-```python
-from memsnapdump.base import TraceEntry, DeviceSnapshot
-from memsnapdump.simulate import SimulateDeviceSnapshot, SimulateHooker
-
-
-class ExamplePrintHooker(SimulateHooker):
-    def post_undo_event(self, already_undo_event: TraceEntry, current_snapshot: DeviceSnapshot) -> bool:
-        print(already_undo_event.to_dict())
-        return True
-
-    def pre_undo_event(self, wait4undo_event: TraceEntry, current_snapshot: DeviceSnapshot) -> bool:
-        print(wait4undo_event.to_dict())
-        return True
-
-
-if __name__ == '__main__':
-    import pandas as pd
-
-    df = pd.read_pickle('tests/test_data/snapshot.pkl')  # 基于pandas解析pickle文件
-    snapshot = SimulateDeviceSnapshot(df, 0)  # 初始化可回放的snapshot对象
-    snapshot.register_hooker(ExamplePrintHooker())  # 注册样例钩子
-    snapshot.replay()  # 开始回放
-
-```
-
-### 2.2 快照切片
-#### 2.2.1 简介
-快照切片是一个典型的基于快照回放实现的功能，可参考`tools/slice_dump/hooker.py`中对于`SliceDumpHooker`的实现。
-
-当前可按照事件顺序平均切分固定个数，或按照固定最大事件数量，对快照文件进行切分。在采集的数据量较大的情况下，可通过该脚本进行剪裁后先局部细节分析。
-#### 2.2.2 使用约束
-同[快照回放](#212-使用约束)功能
-#### 2.2.3 使用方式
-```shell
-# 在项目根目录下执行
-python -m memsnapdump.tools.split [-h] [--device DEVICE] [--slices SLICES] [--max_entries MAX_ENTRIES] [--dump_dir DUMP_DIR] 
-[--dump_type {pkl,json}] snapshot_file
-```
-  | 参数                  | 类型 | 必填 | 默认值            | 说明                                                                    |
-  |---------------------|------|------|----------------|-----------------------------------------------------------------------|
-  | `<snapshot_file>`   | 路径 | ✅ 是 | —              | 输入的 snapshot pickle 文件路径                                              |
-  | `--dump_dir`, `-d`  | 路径 | 否 | snapshot文件所在目录 | 切片转储输出目录                                                              |
-  | `--slices`, `-s`    | 整数 ≥1 | 否 | `4`            | <br/>指定将事件平均切分为多少个片段；<br/>❗仅当按照`slices`平均切片后单片事件数量不超过`max_entries`时生效 |
-  | `--max_entries`     | 整数 ≥1 | 否 | `15000`        | 单个切片最多包含的事件数（若指定 `slices`，此参数作为上限）                                    |
-  | `--dump_type`, `-f` | `pkl` \| `json` | 否 | `pkl`          | 转储文件格式，仅支持 `pkl` 或 `json`                                             |
-  | `--device`          | 整数 ≥0 | 否 | `0`            | 指定回放的设备索引（从 `device_traces` 中选择）                                      |
-#### 2.2.4 示例
-假设已有采集自`0`卡的snapshot文件`/data/snapshot.pickle`，其包含**61**个内存事件，其采集时刻的数据可以表示为：`state.61 + evt[1:61]`
-
-_**方式一：按照固定切片数进行切片**_
-
-以切分4份为例，执行如下命令：
-
-```shell
- python -m memsnapdump.tools.split /data/snapshot.pickle --slices 4
-```
-
-将 61 个事件平均分为 4 个切片，每个切片约 15–16 个事件。 每段输出：该段结束时的内存状态 + 本段包含的事件列表。
-
-| 切片 | 内存状态       | 事件范围     | 事件数量 | 输出件             |
-|------|------------|--------------|----------|-----------------|
-| 1    | `state.13` | `evt[1:13]`  | 13       | slice_1_entry_1_13.pkl |
-| 2    | `state.29` | `evt[14:29]` | 16       | slice_2_entry_14_29.pkl |
-| 3    | `state.45` | `evt[30:45]` | 16       | slice_3_entry_30_45.pkl |
-| 4    | `state.61` | `evt[46:61]` | 16       | slice_4_entry_46_61.pkl |
-
-_**方式二：固定单片最大事件数切片**_
-
-以每片最大20个事件为例，执行如下命令
-```shell
-python -m memsnapdump.tools.split /data/snapshot.pickle --max_entries 20
-```
-
-| 切片 | 内存状态       | 事件范围         | 事件数量 | 输出件 |
-|------|------------|--------------|------| ------ |
-| 1    | `state.1`  | `evt[1:1]`   | 1    | slice_1_entry_1_1.pkl |
-| 2    | `state.21` | `evt[2:21]`  | 20   | slice_2_entry_2_21.pkl |
-| 3    | `state.41` | `evt[22:41]` | 20   | slice_3_entry_22_41.pkl |
-| 4    | `state.61` | `evt[42:61]` | 20   | slice_4_entry_42_61.pkl |
-
-### 2.3 快照转数据库
-#### 2.3.1 简介
-快照转数据库功能可将 snapshot 数据转换为 SQLite 数据库格式，便于后续的数据分析、查询与可视化。该功能同样基于快照回放实现，通过 `DumpEventHooker` 在回放过程中将事件和内存块数据写入数据库。
-
-数据库包含以下两张核心表：
-- `trace_entry`：存储所有内存事件（包括内存分配、释放、段申请等），包含事件ID、动作类型、地址、大小、内存状态统计及调用栈信息。
-- `block`：存储内存块信息，包含地址、大小、请求大小、状态、分配/释放事件ID等。
-
-#### 2.3.2 使用约束
-同[快照回放](#212-使用约束)功能
-
-#### 2.3.3 使用方式
-```shell
-# 在项目根目录下执行
-python -m memsnapdump.tools.dump2db [-h] [--dump_dir DUMP_DIR] [--log LOG_FILE] snapshot_file
-```
-| 参数                  | 类型 | 必填 | 默认值            | 说明                                                                    |
-|---------------------|------|------|----------------|-----------------------------------------------------------------------|
-| `<snapshot_file>`   | 路径 | ✅ 是 | —              | 输入的 snapshot pickle 文件路径                                              |
-| `--dump_dir`, `-o`  | 路径 | 否 | snapshot文件所在目录 | 数据库文件输出目录                                                              |
-| `--log`, `-l`       | 路径 | 否 | —              | 日志文件输出路径。若指定，所有模块的日志将同时输出到控制台和该文件；若文件已存在则覆盖 |
-
-#### 2.3.4 示例
-假设已有 snapshot 文件 `/data/snapshot.pickle`，执行如下命令：
-
-```shell
-python -m memsnapdump.tools.dump2db /data/snapshot.pickle -o /data/output
-```
-
-将在 `/data/output` 目录下生成 `/data/output/snapshot.pickle.db` 数据库文件。
-
-若需要将日志保存到文件以便后续分析：
-
-```shell
-python -m memsnapdump.tools.dump2db /data/snapshot.pickle -o /data/output -l /data/output/dump.log
-```
-
-日志文件将记录所有模块（LOAD、REPLAY、ALLOCATOR、DatabaseDump）的输出信息。
-
-## 3. 本地开发检查
-
-安装开发依赖：
+## Installation
 
 ```bash
 python -m pip install -e .[dev]
 ```
 
-检查命令：
+## Quick start
+
+### Replay a snapshot in Python
+
+```python
+import pandas as pd
+from memsnapdump.simulate import SimulateDeviceSnapshot
+
+snapshot_dict = pd.read_pickle("tests/test_data/snapshot_expandable.pkl")
+snapshot = SimulateDeviceSnapshot(snapshot_dict, 0)
+snapshot.replay()
+```
+
+### Split a large snapshot
+
+```bash
+python -m memsnapdump.tools.split /data/snapshot.pickle --slices 4
+```
+
+### Export a snapshot to SQLite
+
+```bash
+python -m memsnapdump.tools.dump2db /data/snapshot.pickle -o /data/output
+```
+
+## Documentation
+- [Getting started](docs/en/getting-started.md)
+- [Replay guide](docs/en/user-guide/replay.md)
+- [Split guide](docs/en/user-guide/split.md)
+- [Dump-to-database guide](docs/en/user-guide/dump2db.md)
+- [SQLite schema reference](docs/en/reference/snapshot-db-schema.md)
+- [Development guide](docs/en/development/development-guide.md)
+
+## Development checks
 
 ```bash
 ruff check .
@@ -227,41 +56,8 @@ black --check .
 pytest --cov=memsnapdump --cov-fail-under=85
 ```
 
-本地自动修复：
+## Related links
+- [PyTorch: Understanding CUDA Memory Usage](https://docs.pytorch.org/docs/stable/torch_cuda_memory.html)
+- [memory_viz](https://pytorch.org/memory_viz)
 
-```bash
-ruff check . --fix
-black .
-```
-
-GitHub Pull Request workflow 会在 PR 上执行：
-- `ruff check .`
-- `black --check .`
-- `pytest --cov=memsnapdump --cov-fail-under=85`
-
-并在 Python `3.10`、`3.11`、`3.12` 矩阵下运行测试。
-
-## 4. 项目结构说明
-```text
-MemSnapDump/
-├── src/
-│   └── memsnapdump/
-│       ├── __init__.py
-│       ├── base/               # 基础 Snapshot 数据模型与实体定义
-│       ├── simulate/           # 模拟与回放逻辑
-│       ├── tools/              # 命令行入口与工具实现
-│       │   ├── split.py        # 快照切片命令行入口
-│       │   ├── dump2db.py      # 快照转数据库命令行入口
-│       │   ├── slice_dump/     # 快照剪裁工具核心实现
-│       │   └── adaptors/       # 数据适配器模块
-│       └── util/               # 日志、计时、文件、SQLite 元数据等工具
-├── tests/
-│   ├── test_data/              # 测试样例数据
-│   ├── common.py               # 测试公共辅助函数
-│   ├── base/                   # base 模块测试
-│   ├── simulate/               # simulate 模块测试
-│   ├── tools/                  # CLI 与工具模块测试
-│   └── util/                   # util 模块测试
-├── pyproject.toml              # 打包、pytest、coverage、ruff、black 配置
-└── README.md                   # 项目说明文档
-```
+Contributions are welcome via issues and pull requests.
